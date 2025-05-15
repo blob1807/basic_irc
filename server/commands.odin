@@ -385,9 +385,9 @@ cmd_part :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
 
 cmd_ping :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> (err: Error) {
     if len(mess.params) == 0 {
-        rb_cmd_str(rb, s.name, "PONG") or_return
+        rb_cmd_str(rb, s.name, "PONG", s.name) or_return
     } else {
-        rb_cmd_str(rb, s.name, "PONG", mess.params[0]) or_return
+        rb_cmd_str(rb, s.name, "PONG", s.name, mess.params[0]) or_return
     }
 
     err = recv_data(&c.net_buf, c.sock)

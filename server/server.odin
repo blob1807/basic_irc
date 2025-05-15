@@ -334,7 +334,7 @@ server_runner :: proc(s: ^Server) -> (err: Error) {
         if update_timer(&s.timers.client_cleanup) {
             sync.lock(&s.client_lock)
             for k, &c in s.clients {
-                if .Quit in sync.atomic_load(&c.flags) {
+                if .Quit in sync.atomic_load(&c.flags) || thread.is_done(c.thread) {
                     net.close(c.sock)
                     c.sock = 0
 
@@ -389,7 +389,6 @@ server_runner :: proc(s: ^Server) -> (err: Error) {
         all_closed = true
         for _, &c in s.clients {
             if .Has_Closed in sync.atomic_load(&c.thread_flags) {
-                // TODO: thead close
                 thread.destroy(c.thread)
                 c.thread = nil
         
@@ -407,7 +406,6 @@ server_runner :: proc(s: ^Server) -> (err: Error) {
     for all_closed: bool; !all_closed; /**/ {
         for _, &c in s.channels {
             if .Has_Closed in sync.atomic_load(&c.thread_flags) {
-                // TODO: thead close
                 thread.destroy(c.thread)
                 c.thread = nil
 
@@ -776,12 +774,10 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
                 sync.atomic_or(&c.flags, {.Pinged})
             }
 
-        } else {
-            if .Pinged in sync.atomic_load(&c.flags) {
-                sync.atomic_or(&c.flags, {.Close})
-            } 
-        }
-        
+        } else if .Pinged in sync.atomic_load(&c.flags) {
+            sync.atomic_or(&c.flags, {.Close})
+        } 
+
         err = rb_send(rb)
         
         if (Client_Flags{.Close, .Ping_Failed} & sync.atomic_load(&c.flags)) != {} {
