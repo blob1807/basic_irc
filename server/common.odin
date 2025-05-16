@@ -7,6 +7,7 @@ import "core:net"
 import "core:time"
 import "core:thread"
 import "core:strings"
+import "core:reflect"
 import "core:time/timezone"
 import "core:time/datetime"
 import "core:encoding/json"
@@ -71,6 +72,9 @@ load_config :: proc(buf: []u8, s: ^Server, alloc := context.allocator) -> (err: 
 
     } else if !com.is_equal(i.case_map, "ascii") {
         return IRC_Errors.Config_Error
+
+    } else {
+        to_lower(i.case_map)
     }
 
     if i.chan_limit == {} {
@@ -92,6 +96,7 @@ load_config :: proc(buf: []u8, s: ^Server, alloc := context.allocator) -> (err: 
 
     } else if i.chan_types != "#" {
         return IRC_Errors.Config_Error
+    
     }
 
     if i.max_targets == 0 {
@@ -186,29 +191,35 @@ timer_ended :: proc "contextless" (t: Timer) -> bool {
 
 
 // WARNING: MODIFIES INPUT STRING!!! Used for nick & usernames
-to_lower :: proc "contextless" (str: string) {
+to_lower :: proc "contextless" (str: string) -> string {
     // TODO: If I care about speed, look up table might be better
     buf := transmute([]u8)str
+
     for &b in buf {
         if 'A' <= b && b <= 'Z' {
             b |= 32
         }
     }
+
+    return str
 }
 
 // WARNING: MODIFIES INPUT STRING!!! Used for message commmnds
-to_upper :: proc "contextless" (str: string) {
+to_upper :: proc "contextless" (str: string) -> string {
     // TODO: If I care about speed, look up table might be better
     buf := transmute([]u8)str
+
     for &b in buf {
         if 'a' <= b && b <= 'z' {
             b &~= 32
         }
     }
+
+    return str
 }
 
 
-format_server_time :: proc(tz: ^datetime.TZ_Region) -> string {
+format_server_time :: proc(tz: ^datetime.TZ_Region, alloc: runtime.Allocator) -> string {
     basic :: proc(ts: time.Time) -> string {
         ymd_buf: [32]u8
         ymd := time.to_string_yyyy_mm_dd(ts, ymd_buf[:])
@@ -225,8 +236,9 @@ format_server_time :: proc(tz: ^datetime.TZ_Region) -> string {
         p += 1
         dt_str := string(dt_buf[:p])
     
-        return strings.concatenate({ymd, hms, dt_str}, context.temp_allocator)
+        return strings.concatenate({ymd, hms, dt_str})
     }
+    context.allocator = alloc
     
     ts := time.now()
 
@@ -244,17 +256,19 @@ format_server_time :: proc(tz: ^datetime.TZ_Region) -> string {
         return basic(ts)
     }
 
-    return timezone.datetime_to_str(dt, context.temp_allocator)
+    return timezone.datetime_to_str(dt)
 }
 
 
-destroy_message :: proc(mess: Message) {
+destroy_message :: proc(mess: Message, alloc := context.allocator) {
+    context.allocator = alloc
     delete(mess.raw)
     delete(mess.params)
 }
 
 
-destroy_i_support :: proc(s: ^Server) {
+destroy_i_support :: proc(s: ^Server, alloc := context.allocator) {
+    context.allocator = alloc
     delete(s.i_support_str)
     delete(s.i_support.case_map)
     delete(s.i_support.chan_types)
@@ -263,7 +277,8 @@ destroy_i_support :: proc(s: ^Server) {
 }
 
 
-destroy_user :: proc(c: ^Client) {
+destroy_user :: proc(c: ^Client, alloc := context.allocator) {
+    context.allocator = alloc
     if c.thread != nil {
         thread.terminate(c.thread, 0)
         thread.destroy(c.thread)
@@ -283,7 +298,8 @@ destroy_user :: proc(c: ^Client) {
 }
 
 
-destroy_chan :: proc(c: ^Channel) {
+destroy_chan :: proc(c: ^Channel, alloc := context.allocator) {
+    context.allocator = alloc
     if c.thread != nil {
         thread.terminate(c.thread, 0)
         thread.destroy(c.thread)

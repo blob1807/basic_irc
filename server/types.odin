@@ -162,7 +162,7 @@ Server :: struct {
 
     nicks:    map[string]string, //      nick -> username
     clients:  map[string]^Client, // username -> Client
-    nick_lock:  sync.Ticket_Mutex,
+    nick_lock:   sync.Ticket_Mutex,
     client_lock: sync.Ticket_Mutex,
     
     channels: map[string]^Channel,
@@ -173,7 +173,7 @@ Server :: struct {
     close_new_client_thread: bool, // atmoic
     close_server: bool, // atmoic
 
-    flags: Server_Flags,
+    flags: Server_Flags, // atmoic
 
     using i_support: I_Support,
     i_support_str: string,
@@ -223,7 +223,7 @@ Client :: struct {
 
     net_buf: Net_Buffer,
     
-    flags: Client_Flags,
+    flags: Client_Flags, // atmoic
 
     ping_token: string,
     pinged: time.Tick,
@@ -263,11 +263,11 @@ Channel :: struct {
     to_remove: [dynamic]^Client, // TODO: Swap to a sync/chan
     to_send:   [dynamic]Message, // TODO: Swap to a sync/chan
     // to_remove: chan.Chan(^Client),
-    //to_send: chan.Chan(Message),
+    // to_send:   chan.Chan(Message),
 
     to_send_alloc: runtime.Allocator,
 
-    flags: Channel_Flags,
+    flags: Channel_Flags, // atmoic
 
     modes: Channel_Modes,
     user_limit: int,

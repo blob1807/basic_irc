@@ -22,9 +22,9 @@ import com "../common"
 cmd_info :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err: Error) {
     // https://modern.ircdocs.horse/#info-message
     rb_cmd(rb, s.name, .RPL_INFO, c.nick, ":Server Version " + VERSION)
-    rb_cmd(rb, s.name, .RPL_INFO, c.nick, ":Server Time", format_server_time(s.info.tz))
+    rb_cmd(rb, s.name, .RPL_INFO, c.nick, ":Server Time", format_server_time(s.info.tz, context.temp_allocator))
     rb_cmd(rb, s.name, .RPL_INFO, c.nick, ":Created by blob1807")
-    rb_cmd(rb, s.name, .RPL_INFO, c.nick, ":Main repo https://github.com/blob1807/odin-basic-irc")
+    rb_cmd(rb, s.name, .RPL_INFO, c.nick, ":Main repo https://github.com/blob1807/basic_irc")
     rb_cmd(rb, s.name, .RPL_ENDOFINFO, c.nick, ":End of /INFO")
     
     return 
@@ -673,7 +673,7 @@ cmd_whois :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -
     
     info := con({
         ":Server Version " + VERSION,
-        ":Server Time", format_server_time(s.info.tz),
+        ":Server Time", format_server_time(s.info.tz, context.temp_allocator),
         ":Created by blob1807",
         ":Main repo https://github.com/blob1807/odin-basic-irc"
     })

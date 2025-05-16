@@ -1,5 +1,5 @@
 
-- [ ] Rework all cmd_* to take a buffer
+- [X] Rework all cmd_* to take a buffer
     - [ ] Work out where it's worth to send the buffer
 
 - [ ] Move to an id based system:

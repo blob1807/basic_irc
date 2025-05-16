@@ -24,6 +24,7 @@ HELP :: `
 ================================================================================================
 
     A basic multi-threaded IRC client with simple formating.
+    Only 1 channel & server can be connected to at once.
 
     Usage:
         Any non commands will be sent as a noraml message
@@ -43,7 +44,7 @@ HELP :: `
             join (j) <server (s) / channel (c)> <url / name> [optional]<leave message>
                 joins server / channel. leaving current one. sends leave message when given.
 
-            cmd (c) <command> <parametors>
+            cmd (c) <command> <parameters>
                 send IRC command
             !
                 ingore command. sent as normal message.
