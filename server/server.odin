@@ -70,6 +70,7 @@ server_cleanup :: proc(s: ^Server, free_i_support := true) {
 server_runner :: proc(s: ^Server) -> (err: Error) {
     context.random_generator = crypto.random_generator()
 
+    // This is only done here because it's unknown if the proc will be in a thread or not
     temp_arena: virtual.Arena
     arena_error := virtual.arena_init_growing(&temp_arena)
     if arena_error != nil {
@@ -486,7 +487,9 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
     defer if err != nil && false {
         #partial switch v in err {
         case IRC_Errors:
-            if v != .Message_To_Big && v != .Registration_Failed {
+            #partial switch v {
+            case .Message_To_Big, .Registration_Failed, .User_Mess_To_Big:
+            case:
                 send_cmd_str(c.sock, s.name, "ERROR", ":Unknown Server Error.")
             }
         case:
@@ -507,7 +510,7 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
     }
 
     // https://modern.ircdocs.horse/#connection-registration
-    got_cap: bool
+    cap_mess: Maybe(Message)
     mess: Message
     err = recv_data(&c.net_buf, c.sock)
     if err != nil {
@@ -515,24 +518,23 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
         return
     }
 
-    mess, err = parse_message(&c.net_buf, alloc = context.temp_allocator)
+    mess, err = parse_message(&c.net_buf, context.temp_allocator)
     if err != nil {
         return
     }
 
     // Capability Negotiation
     if mess.cmd == "CAP" {
-        // ignore it
+        cap_mess = clone_message(mess, context.temp_allocator) or_return
         mess, err = get_message(s, c)
         check_err(s, c, rb, err) or_return
         
-        got_cap = true
         log.debug("Gotten Capability Negotiation. Ignoring.")
     }
 
     // Password
     if mess.cmd == "PASS" {
-        // ignore it
+        // ignore it, no data is preserved between sessions.
         mess, err = get_message(s, c)
         check_err(s, c, rb, err) or_return
     } 
@@ -579,7 +581,7 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
 
 
     if cmds != {.Nick, .User} {
-        rb_cmd(rb, s.name, .ERR_NOTREGISTERED, "* :Registration failed. No USER or NICK message given")
+        rb_cmd(rb, s.name, .ERR_NOTREGISTERED, "* :Registration failed. No USER nor NICK message given")
         return IRC_Errors.Registration_Failed
     }
     if .Nick not_in cmds {
@@ -595,19 +597,23 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
 
     pop_net_buf(&c.net_buf)
 
-    if got_cap {
-        err := recv_data(&c.net_buf, c.sock)
-        #partial switch v in err {
-        case net.TCP_Recv_Error:
-            #partial switch v {
-            case .Timeout:
+    if mess, ok := cap_mess.?; ok {
+        when false {
+            cap_negotiation(s, c, rb, mess) or_return
+        } else {
+            err := recv_data(&c.net_buf, c.sock)
+            #partial switch v in err {
+            case net.TCP_Recv_Error:
+                #partial switch v {
+                case .Timeout:
+                case:
+                    return err
+                }
+            case nil:
+                pop_net_buf(&c.net_buf, .First) or_return
             case:
                 return err
             }
-        case nil:
-            pop_net_buf(&c.net_buf, .First) or_return
-        case:
-            return err
         }
     }
 
@@ -716,12 +722,15 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
                 #partial switch v {
                 case .No_End_Of_Message:
                     rb_cmd_str(rb, s.name, "ERROR", c.user, ":No end of message was found.")
+
                 case .User_Mess_To_Big:
                     rb_cmd(rb, s.name, .ERR_INPUTTOOLONG, c.user, ":Input line was too long.")
                 }
+
                 if .Errored in c.flags {
                     sync.atomic_or(&c.flags, {.Close})
                 }
+
                 sync.atomic_or(&c.flags, {.Errored})
 
             case net.Network_Error:
@@ -734,6 +743,7 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
                 if .Errored in c.flags {
                     sync.atomic_or(&c.flags, {.Close})
                 }
+
                 sync.atomic_or(&c.flags, {.Errored})
 
             case:
@@ -741,6 +751,7 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
                 if .Errored in c.flags {
                     sync.atomic_or(&c.flags, {.Close})
                 }
+
                 sync.atomic_or(&c.flags, {.Errored})
             }
         }
@@ -752,6 +763,7 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
             rb_mess(rb, mess, context.temp_allocator)
             delete(mess.raw, c.to_send_alloc)
         }
+
         clear(&c.to_send)
         sync.unlock(&c.lock)
 
@@ -1210,9 +1222,7 @@ recv_data :: proc(n_buf: ^Net_Buffer, sock: net.TCP_Socket) -> (err: net.Network
 }
 
 
-parse_message :: proc(n: ^Net_Buffer, alloc: runtime.Allocator, clone := false, peek := false) -> (mess: Message, err: Error) {
-    context.allocator = alloc
-
+index_message :: proc(n: ^Net_Buffer, peek := false) -> (pos: int, err: Error) {
     if peek {
         if n.peek < n.read {
             n.peek = n.read
@@ -1224,12 +1234,8 @@ parse_message :: proc(n: ^Net_Buffer, alloc: runtime.Allocator, clone := false, 
                 return
             }
     
-            mess.raw = string(n.buf[:i])
+            pos = i
             n.peek = i + len(MESS_END)
-            
-            if clone {
-                mess.raw = strings.clone(mess.raw)
-            }
             
         } else {
             err = IRC_Errors.No_End_Of_Message
@@ -1242,18 +1248,27 @@ parse_message :: proc(n: ^Net_Buffer, alloc: runtime.Allocator, clone := false, 
             return
         }
 
-        mess.raw = string(n.buf[:i])
+        pos = i
         n.read = i + len(MESS_END)
-        
-        if clone {
-            mess.raw = strings.clone(mess.raw)
-        }
         
     } else {
         err = IRC_Errors.No_End_Of_Message
         return
     }
+    
+    return 
+}
 
+
+parse_message :: proc{parse_message_str, parse_message_net_buf}
+
+parse_message_net_buf :: proc(n: ^Net_Buffer, alloc: runtime.Allocator, clone := false, peek := false) -> (mess: Message, err: Error) {
+    idx := index_message(n, peek) or_return
+    return parse_message_str(string(n.buf[:idx]), alloc, clone)
+}
+
+parse_message_str :: proc(str: string, alloc: runtime.Allocator, clone := false) -> (mess: Message, err: runtime.Allocator_Error) {
+    mess.raw = str
     mess.recived = time.now()
 
     i: int
@@ -1355,6 +1370,11 @@ parse_params :: proc(params: string, alloc: runtime.Allocator) -> (res: []string
     shrink(&buf)
 
     return buf[:], nil
+}
+
+clone_message :: proc(mess: Message, alloc: runtime.Allocator) -> (res: Message, err: runtime.Allocator_Error) {
+    raw := strings.clone(mess.cmd, alloc)
+    return parse_message(raw, alloc)
 }
 
 format_message :: proc(mess: Message, alloc: runtime.Allocator) -> string {

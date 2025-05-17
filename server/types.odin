@@ -30,8 +30,8 @@ CLIENT_CHECK_TIMEOUT :: time.Millisecond * 50
 ONBOARD_TIMEOUT      :: time.Second
 
 @(rodata)
-MESS_END     := []byte{'\r', '\n'}
-MESS_END_STR :: "\r\n"
+MESS_END      := []byte{'\r', '\n'}
+MESS_END_STR  :: "\r\n"
 
 //  i: invisable; o: global OP;
 USER_MODES    :: "+io"

@@ -32,4 +32,11 @@
 - Ensure conplince with
     - [ ] https://modern.ircdocs.horse/#compatibility-with-incorrect-software
 
-- [ ] Remove virtual arenas from threads. Assume default temp alloc is used.
+- [X] Remove virtual arenas from threads. Assume default temp alloc is used.
+
+- [~] Should `Message.cmd` be an enum???
+    - I remember thinking it wouldn't be worth it during parser because I'd
+      still need to save the string on Unknown command.
+      Plus I'd still need check all values or use a map
+
+- [ ] Implement Capability Negotiation

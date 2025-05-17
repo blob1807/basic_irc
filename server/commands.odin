@@ -687,3 +687,8 @@ cmd_whois :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -
     return 
 }
 
+
+cap_negotiation :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> (err: Error) {
+
+    return
+}
