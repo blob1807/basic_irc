@@ -15,6 +15,11 @@ import "core:encoding/json"
 import com "../common"
 
 
+set_ctrl_hander :: proc() -> bool {
+    return _set_ctrl_hander()
+}
+
+
 format_i_support :: proc(i: I_Support, alloc := context.allocator) -> (res: string, err: runtime.Allocator_Error) {
     // TODO: Apprently it's making malformed formating
     // Probaly missing things
@@ -133,12 +138,24 @@ load_config :: proc(buf: []u8, s: ^Server, alloc := context.allocator) -> (err: 
     if c.timeouts.onboard == 0 {
         c.timeouts.onboard = ONBOARD_TIMEOUT
     }
+
     if c.timers.ping == 0 {
         c.timers.ping = PING_TIMER_DURATION
     }
     if c.timers.ping_check == 0 {
         c.timers.ping_check = PING_CHECK_TIMER_DURATION
     }
+    if c.timers.client_cleanup == 0 {
+        c.timers.client_cleanup = CLIENT_CLEANUP_TIMER_DURATION
+    }
+
+    /*
+    if c.caps_arr != nil {
+        c.caps_set = com.caps_to_set(c.caps_arr)
+        delete(c.caps_arr)
+    }
+    */
+
 
     s.name = c.name
     s.address = c.address
@@ -148,6 +165,8 @@ load_config :: proc(buf: []u8, s: ^Server, alloc := context.allocator) -> (err: 
     s.onboard_timeout = c.timeouts.onboard
     s.timers.ping.duration = c.timers.ping
     s.timers.ping_check.duration = c.timers.ping_check
+
+    // s.caps = c.caps_set
 
 
     if len(c.admins) != 0 {
@@ -288,6 +307,7 @@ destroy_user :: proc(c: ^Client, alloc := context.allocator) {
         net.close(c.sock)
     }
 
+    delete(c.full)
     delete(c.nick)
     delete(c.user)
     delete(c.real)
