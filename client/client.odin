@@ -332,7 +332,7 @@ parse_message :: proc(c: ^Client, clone_mess := false, pop_mess := false, alloc 
         print_str(c, "Failed to parse Code or Command", true)
 
     } else if v, ok := strconv.parse_int(s[:i], 10); ok {
-        mess.code = common.Response_Codes(v)
+        mess.code = common.Response_Code(v)
         s = s[i+1:]
 
     } else {

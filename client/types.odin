@@ -131,7 +131,7 @@ Message :: struct {
     tags:    string,
     sender:  Sender,
     cmd:     string,
-    code:    common.Response_Codes,
+    code:    common.Response_Code,
     params:  []string,
     tail:    string,
 }
