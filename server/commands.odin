@@ -15,14 +15,17 @@ import "core:slice"
 import "core:strings"
 import "core:fmt"
 import "core:sync/chan"
+import "core:log"
 
 import com "../common"
 
 
 cmd_info :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err: Error) {
     // https://modern.ircdocs.horse/#info-message
+    st := format_server_time(s.info.tz, context.temp_allocator)
+
     rb_cmd(rb, s.name, .RPL_INFO, c.nick, ":Server Version " + VERSION)
-    rb_cmd(rb, s.name, .RPL_INFO, c.nick, ":Server Time", format_server_time(s.info.tz, context.temp_allocator))
+    rb_cmd(rb, s.name, .RPL_INFO, c.nick, ":Server Time", st)
     rb_cmd(rb, s.name, .RPL_INFO, c.nick, ":Created by blob1807")
     rb_cmd(rb, s.name, .RPL_INFO, c.nick, ":Main repo https://github.com/blob1807/basic_irc")
     rb_cmd(rb, s.name, .RPL_ENDOFINFO, c.nick, ":End of /INFO")
@@ -36,9 +39,9 @@ cmd_join :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
         return rb_cmd(rb, s.name, .ERR_NEEDMOREPARAMS, c.nick, ":No channels were provided")
     }
 
-    chans := strings.split(mess.params[0], ",", context.temp_allocator)
+    chans := mess.params[0]
 
-    for chan in chans {
+    for chan in strings.split_after_iterator(&chans, ",") {
         if s.chan_limit.limit != -1 && len(c.chans) < s.chan_limit.limit {
             rb_cmd(rb, s.name, .ERR_TOOMANYCHANNELS, c.nick, chan, ":You have joined too many channels") or_return
             break
@@ -60,12 +63,12 @@ cmd_join :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
         out := Message {
             cmd = "JOIN",
             sender = {full = c.full,  type = .User},
-            params = make([]string, 1, ch.to_send_alloc)
+            params = make([]string, 1, ch.to_send_alloc) 
         }
         out.params[0] = chan_clone
         
         append(&ch.to_send, out)
-        append(&ch.users, c)
+        append(&ch.users, c) 
         append(&c.chans, chan_clone)
         sync.unlock(&s.channs_lock)
 
@@ -91,22 +94,24 @@ cmd_kick :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
         return rb_cmd(rb, s.name, .ERR_NOTONCHANNEL, c.nick, chan_name, ":No in channel")
     }
 
-    sync.guard(&s.channs_lock)
+    sync.lock(&s.channs_lock)
     chan, ok := s.channels[chan_name]
+    sync.unlock(&s.channs_lock)
+
     if !ok {
         return rb_cmd(rb, s.name, .ERR_NOSUCHCHANNEL, c.nick, chan_name, ":No such channel")
     }
 
+    sync.guard(&chan.lock)
     if !slice.contains(chan.admin[:], c.user) {
         return rb_cmd(rb, s.name, .ERR_CHANOPRIVSNEEDED, c.nick, chan_name, ":You're not channel operator")
     }
 
-    users := strings.split(mess.params[1], ",", context.temp_allocator)
+    users := mess.params[1]
     comment := mess.tail != "" ? mess.tail : ":User has been kicked."
 
-    // TODO: Locked by server_runner rn
-    // sync.guard(&s.client_lock)
-    for user in users {
+    sync.guard(&s.client_lock)
+    for user in strings.split_after_iterator(&users, ",") {
         cl, ok := s.clients[user]
         if !ok || !slice.contains(chan.users[:], cl) {
             rb_cmd(rb, s.name, .ERR_USERNOTINCHANNEL, c.nick, user, chan_name, ":They aren't on that channe")
@@ -122,8 +127,7 @@ cmd_kick :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
 
 
 cmd_kill :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> (err: Error) {
-    // TODO
-    // https://modern.ircdocs.horse/#kill-message
+    // TODO: https://modern.ircdocs.horse/#kill-message
     return rb_cmd_str(rb, s.name, "ERROR", c.nick, ":Command", mess.cmd, "is currently WIP.")
 }
 
@@ -134,10 +138,10 @@ cmd_list :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
         return rb_cmd(rb, s.name, .RPL_LISTEND, c.nick, ":End of /LIST")
     }
 
-    names := strings.split(mess.params[0], ",", context.temp_allocator) or_return
+    names := mess.params[0]
     rb_cmd(rb, s.name, .RPL_LISTSTART, c.nick, "Channel :Users Name")
 
-    for name in names {
+    for name in strings.split_after_iterator(&names, ",") {
         if len(name) == 0 || name[0] != '#' {
             continue
         }
@@ -271,12 +275,11 @@ cmd_names :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -
         left := MESSAGE_SIZE - len(to_send.raw)
         
         pos: int
+        sync.guard(&s.client_lock)
         for pos < len(chan.users) {
             strings.write_byte(&sb, ':')
 
             for /**/; pos < len(chan.users); pos += 1 {
-                // TODO: Locked by server_runner rn
-                // sync.guard(&s.client_lock)
                 user := chan.users[pos]
                 ok := user.user in s.clients
 
@@ -342,12 +345,12 @@ cmd_part :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
 
     reason: string
     if len(mess.params) == 2 {
-        reason = strings.clone(mess.params[1], context.temp_allocator)
+        reason = strings.clone(mess.params[1], context.temp_allocator) or_return
     }
 
-    names := strings.split(mess.params[0], ",")
+    names := mess.params[0]
 
-    for name in names {
+    for name in strings.split_after_iterator(&names, ",") {
         i, found := slice.linear_search(c.chans[:], name)
         if !found {
             rb_cmd(rb, s.name, .ERR_NOTONCHANNEL, c.nick, name, ":You're not on that channel") or_return
@@ -431,7 +434,7 @@ cmd_privmsg :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message)
         return rb_cmd(rb, s.name, .ERR_NOTEXTTOSEND, c.nick, ":No text to send")
     }
 
-    targets := strings.split(mess.params[0], ",") 
+    targets := strings.split(mess.params[0], ",", context.temp_allocator) or_return
     if len(targets) > s.max_targets {
         return rb_cmd(rb, s.name, .ERR_TOOMANYTARGETS, c.nick, ":Too many targets (PRIVMSG)")
     }
@@ -443,7 +446,7 @@ cmd_privmsg :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message)
 
     tail := mess.tail
     if tail != "" && tail[0] != ':' {
-        tail = strings.concatenate({":", tail}, context.temp_allocator)
+        tail = strings.concatenate({":", tail}, context.temp_allocator) or_return
     }
 
     for tar in targets {
@@ -462,11 +465,11 @@ cmd_privmsg :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message)
 
         if ok {
             sync.guard(&chan.lock)
-            to_send.params = make([]string, 1, chan.to_send_alloc)
+            to_send.params = make([]string, 1, chan.to_send_alloc) or_return
             to_send.params[0] = chan.name
-            to_send.tail = strings.clone(tail, chan.to_send_alloc)
+            to_send.tail = strings.clone(tail, chan.to_send_alloc) or_return
 
-            append(&chan.to_send, to_send)
+            append(&chan.to_send, to_send) or_return
             continue
         }
 
@@ -558,7 +561,7 @@ cmd_time :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err: Error) {
 
 cmd_user :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> (err: Error) {
     if .Registered in c.flags {
-        return rb_cmd(rb, s.name, .ERR_ALREADYREGISTERED, c.nick, ":You may not reregister")
+        return rb_cmd(rb, s.name, .ERR_ALREADYREGISTERED, c.nick, ":You may not reregister again")
     }
 
     if len(mess.params) != 4 && len(mess.params) != 3 {
@@ -584,7 +587,7 @@ cmd_user :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
     }
 
     if !com.is_valid_user(user) {
-        return rb_cmd(rb, s.name, .ERR_UNKNOWNERROR, c.nick, "USER :Malformed username")
+        return rb_cmd(rb, s.name, .ERR_INVALIDUSERNAME, c.nick, "USER :Malformed username")
     }
 
     if len(user) > s.i_support.user_len {
@@ -631,8 +634,7 @@ cmd_who :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> 
         return rb_cmd(rb, s.name, .RPL_ENDOFWHOIS, c.nick, mask, ":End of WHO list")
     }
 
-    // TODO: Locked by server_runner rn
-    //sync.guard(&s.client_lock)
+    sync.guard(&s.client_lock)
     for user in chan.users {
         sync.guard(&user.lock)
         if user.user not_in s.clients{
@@ -649,9 +651,7 @@ cmd_who :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> 
 
 
 cmd_whois :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> (err: Error) {
-    // TODO
     // https://modern.ircdocs.horse/#whois-message
-    con :: strings.concatenate
 
     if len(mess.params) < 1 {
         return rb_cmd(rb, s.name, .ERR_NONICKNAMEGIVEN, c.nick, ":No nickname given")
@@ -669,14 +669,19 @@ cmd_whois :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -
         return rb_cmd(rb, s.name, .ERR_NOSUCHNICK, c.nick, nick, ":No such nick/channel")
     }
 
-    rb_cmd(rb, s.name, .RPL_WHOISUSER, c.nick, nick, name, s.name, con({"* :", user.real}))
+    rb_cmd(
+        rb, s.name, .RPL_WHOISUSER, 
+        c.nick, nick, name, s.name, 
+        strings.concatenate({"* :", user.real}, context.temp_allocator)
+    )
     
-    info := con({
+    info := strings.concatenate({
         ":Server Version " + VERSION,
         ":Server Time", format_server_time(s.info.tz, context.temp_allocator),
         ":Created by blob1807",
-        ":Main repo https://github.com/blob1807/odin-basic-irc"
+        ":Main repo https://github.com/blob1807/basic-irc"
     })
+
     rb_cmd(rb, s.name, .RPL_WHOISSERVER, c.nick, nick, s.name, info)
 
     if slice.contains(s.admins[:], name) {
@@ -688,7 +693,52 @@ cmd_whois :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -
 }
 
 
-cap_negotiation :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> (err: Error) {
+cmd_cap :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message, poison: string) -> (done: bool, err: Error) {
+    if .Registered in sync.atomic_load(&c.flags) {
+        err = rb_cmd(rb, s.name, .ERR_ALREADYREGISTERED, c.nick, "* :You can only negotiate capability once per session")
+        done = true
+        return
+    }
+
+    if len(mess.params) < 1 {
+        err = rb_cmd(rb, s.name, .ERR_NEEDMOREPARAMS, c.nick, "CAP :Not enough parameters")
+        return
+    }
+
+    // TODO: Poison the cap list to ensure clients are properaly checking it
+    // https://ergo.chat/nope
+
+    switch to_upper(mess.params[0]) {
+    case "LS":
+        tail := strings.concatenate({":", poison}, context.temp_allocator)
+        err = rb_cmd_str(rb, s.name, "CAP", c.nick, "LS", tail)
+
+    case "LIST":
+        tail := strings.concatenate({":", poison}, context.temp_allocator)
+        err = rb_cmd_str(rb, s.name, "CAP", c.nick, "LIST", tail)
+
+    case "REQ":
+        if strings.contains(to_lower(mess.tail), poison) {
+            c.quit_mess = strings.concatenate(
+                {":Requesting the \"", poison, "\"client capability is forbidden"}, 
+                context.temp_allocator
+            )
+            c.flags += {.Close}
+            return true, IRC_Errors.Capability_Failed
+        }
+
+        tail := strings.concatenate({":", mess.tail})
+        err = rb_cmd_str(rb, s.name, "CAP", c.nick, "NAK", tail)
+
+    case "END":
+        done = true
+
+    case:
+        log.error("Invalid capability command", mess.params[0], mess)
+        err = rb_cmd(rb, s.name, .ERR_INVALIDCAPCMD, c.nick, "CAP",  mess.params[0], ":Invalid capability command")
+
+    }
 
     return
 }
+
