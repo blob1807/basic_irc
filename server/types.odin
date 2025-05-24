@@ -97,6 +97,9 @@ IRC_Errors :: enum {
 
     Config_Error,
     Registration_Failed,
+    Capability_Failed,
+
+    Server_Force_Quit
 }
 
 Error :: union #shared_nil { 
@@ -110,14 +113,10 @@ Error :: union #shared_nil {
 }
 
 
-Atomic :: struct ($T: typeid) where ir.atomic_type_is_lock_free(T) {
-    v: T
-}
-
 
 Response_Buffer :: struct {
     sock: net.TCP_Socket,
-    data: [dynamic]u8,
+    data: [dynamic]u8 `fmt:"q"`,
 }
 
 
@@ -149,6 +148,8 @@ Server_Flag :: enum {
 
 Server_Flags :: bit_set[Server_Flag]
 
+
+
 Server :: struct {
     name: string,
     
@@ -158,9 +159,10 @@ Server :: struct {
 
     net_buf: Net_Buffer,
 
-    pool: thread.Pool,
+    base_alloc: runtime.Allocator,
+    base_logger: runtime.Logger,
 
-    nicks:    map[string]string, //      nick -> username
+    nicks:    map[string]string,  //     nick -> username
     clients:  map[string]^Client, // username -> Client
     nick_lock:   sync.Ticket_Mutex,
     client_lock: sync.Ticket_Mutex,
@@ -171,15 +173,16 @@ Server :: struct {
     close_client_threads:    bool, // atmoic
     close_channel_threads:   bool, // atmoic
     close_new_client_thread: bool, // atmoic
-    close_server: bool, // atmoic
+    close_server: bool,  // atmoic
 
     flags: Server_Flags, // atmoic
+    // caps:  common.Capabilities_Set,
 
     using i_support: I_Support,
     i_support_str: string,
 
     stats: Server_Stats,
-    info: Server_Info,
+    info:  Server_Info,
 
     admins: [dynamic]string, // usernames
 
@@ -187,7 +190,7 @@ Server :: struct {
     
     timers: struct {
         ping, ping_check: Timer,
-        client_cleanup: Timer,
+        client_cleanup:   Timer,
     },
 }
 
@@ -224,19 +227,23 @@ Client :: struct {
     net_buf: Net_Buffer,
     
     flags: Client_Flags, // atmoic
+    caps: common.Capabilities_Set,
 
-    ping_token: string,
+    ping_token: string `fmt:"q"`,
     pinged: time.Tick,
 
     chans:   [dynamic]string,
     to_send: [dynamic]Message, // TODO: Swap to a sync/chan
     // to_send: chan.Chan(Message),
+    mess_cache: [dynamic]Delayed_Message,
 
     to_send_alloc: runtime.Allocator,
 
     thread: ^thread.Thread,
     thread_flags: Thread_Flags, // atomic
     lock: sync.Mutex,
+
+    quit_mess: string,
 }
 
 
@@ -283,22 +290,28 @@ Sender_Type :: enum {
 }
 
 Sender :: struct {
-    full: string,
-    name: string,
+    full: string `fmt:"q"`,
+    name: string `fmt:"q"`,
     type: Sender_Type,
 }
 
 Message :: struct {
     recived: time.Time,
     raw:     string `fmt:"q"`, // All other fields are views/slices into this string.
-    tags:    string,
+    tags:    string `fmt:"q"`,
     sender:  Sender,
-    cmd:     string,
-    code:    common.Response_Codes,
+    cmd:     string `fmt:"q"`,
+    code:    common.Response_Code,
     params:  []string, // Allocated to context.temp_allocator
-    tail:    string,
+    tail:    string `fmt:"q"`,
 }
 
+
+Delayed_Message :: struct {
+    using mess: Message,
+    dest:  string `fmt:"q"`,
+    delay: Timer,
+}
 
 
 I_Support :: struct {
@@ -322,13 +335,20 @@ Config :: struct {
     name:    string,
     address: string,
     admins:  []string,
+
+    // caps_set: common.Capabilities_Set,
+    // caps_arr: []common.Capability,
+
     timeouts: struct {
         onboard: time.Duration,
     },
+
     timers: struct {
-        ping: time.Duration,
-        ping_check: time.Duration,
+        ping:           time.Duration,
+        ping_check:     time.Duration,
+        client_cleanup: time.Duration
     },
+
     i_support: I_Support,
 }
 
