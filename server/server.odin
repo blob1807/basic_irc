@@ -19,12 +19,30 @@ import "core:reflect"
 import "core:sync/chan"
 import "core:mem/virtual"
 import "core:time/timezone"
+import "core:encoding/uuid"
 
 import com "../common"
 
 
+// WARNING THIS WILL NOT DO ANY CLEAN UP!!! IT WILL CAUSE MEMORY LEAKS & LEAVE THREADS OPEN!!!
+// Immediately returns `server_runner` with `IRC_Errors.Server_Force_Quit` at the start of the next cycle.
+FORCE_QUIT_SERVER: bool = false
+
+// Gracefully Closes Server. Will do clean up.  
+// Stops main loop, eqvialte to setting `Server.close_server`.
+FORCE_CLOSE_SERVER: bool = false
+
+
+
+
 // inits a server with default settings.
-init_server :: proc(s: ^Server, addr: string, name := DEFAULT_NAME, network := DEFAULT_NETWORK, set_i_support := true) -> (err: Error) {
+init_server :: proc(
+    s: ^Server, addr: string, 
+    name := DEFAULT_NAME, network := DEFAULT_NETWORK, set_i_support := true,
+    allocator := context.allocator, logger := context.logger,
+) -> (err: Error) {
+    context.allocator = allocator
+
     s.name = name
     s.address = addr
     s.network = network
@@ -34,15 +52,24 @@ init_server :: proc(s: ^Server, addr: string, name := DEFAULT_NAME, network := D
     s.timers.client_cleanup.duration = CLIENT_CLEANUP_TIMER_DURATION
 
     if set_i_support {
+        d := DEFAULT_I_SUPPORT
         s.i_support = DEFAULT_I_SUPPORT
-        s.i_support_str = strings.clone(DEFAULT_I_SUPPORT_STR) or_return
+        s.i_support.case_map   = strings.clone(d.case_map) or_return
+        s.i_support.chan_types = strings.clone(d.chan_types) or_return
+        s.i_support.network    = strings.clone(d.network) or_return
+        s.i_support.status_msg = strings.clone(d.status_msg) or_return
+        s.i_support_str        = strings.clone(DEFAULT_I_SUPPORT_STR) or_return
     }   
 
     s.info.tz, _ = timezone.region_load("local")
     s.info.version = VERSION
 
+    s.base_alloc = allocator
+    s.base_logger = logger
+
     return
 }
+
 
 
 server_cleanup :: proc(s: ^Server, free_i_support := true) {
@@ -81,6 +108,7 @@ server_runner :: proc(s: ^Server) -> (err: Error) {
     context.temp_allocator = virtual.arena_allocator(&temp_arena)
     defer virtual.arena_destroy(&temp_arena)
 
+
     if s.address != "" {
         addr_ep, addr_ep_ok := net.parse_endpoint(s.address)
         if !addr_ep_ok {
@@ -90,8 +118,9 @@ server_runner :: proc(s: ^Server) -> (err: Error) {
         s.ep = addr_ep
 
     } else if s.ep == {} {
+        log.info("Endpoint or Address not set. Using Default Endpoint.")
         s.ep = DEFAULT_ENDPOINT
-    }    
+    }
 
     sock, sock_err := net.listen_tcp(s.ep)
     if sock_err != nil {
@@ -137,7 +166,11 @@ server_runner :: proc(s: ^Server) -> (err: Error) {
     start_timer(&s.timers.client_cleanup)
     log.infof("Sever (%v) started on %v", s.name, s.ep)
 
-    for !sync.atomic_load(&s.close_server) {
+    for !sync.atomic_load(&s.close_server) && !FORCE_CLOSE_SERVER {
+        if FORCE_QUIT_SERVER {
+            return IRC_Errors.Server_Force_Quit
+        }
+
         defer free_all(context.temp_allocator)
         // handle clients
         // handle channels
@@ -340,6 +373,7 @@ server_runner :: proc(s: ^Server) -> (err: Error) {
                     c.sock = 0
 
                     thread.terminate(c.thread, 0)
+                    thread.destroy(c.thread)
     
                     delete_key(&s.nicks, c.nick)
                     assert(c.nick not_in s.nicks)
@@ -347,16 +381,18 @@ server_runner :: proc(s: ^Server) -> (err: Error) {
                     delete(c.full)
                     delete(c.real)
                     delete(c.nick)
+                    delete(c.chans)
                     delete(c.ping_token)
-    
-                    free(c)
-                    c = {}
     
                     delete_key(&s.clients, k)
                     assert(k not_in s.clients)
     
                     log.debug("User \"", k, "\"has been removed from the server", sep="")
                     delete(k) // k == c.user
+
+                    mem.zero(c, size_of(Client))
+                    free(c)
+                    c = nil
                 }
             }
             sync.unlock(&s.client_lock)
@@ -425,7 +461,9 @@ server_runner :: proc(s: ^Server) -> (err: Error) {
 
 
 open_new_clients_thread :: proc(s: ^Server) {
-    context.logger = base_logger
+    context.logger = s.base_logger
+    context.allocator = s.base_alloc
+    context.random_generator = crypto.random_generator()
 
     for !sync.atomic_load(&s.close_new_client_thread) {
         defer free_all(context.temp_allocator)
@@ -452,7 +490,12 @@ open_new_clients_thread :: proc(s: ^Server) {
 
         if err != nil || rb_err != nil {
             log.errorf("Onboard Err: %v;  RB Err: %v;  Client: %v", err, rb_err, c)
-            send_cmd_str(c.sock, s.name, "QUIT", c.user, ":Server has closed your connection.")
+            if c.quit_mess != "" {
+                send_cmd_str(c.sock, s.name, "QUIT", c.user, c.quit_mess)
+            } else {
+                send_cmd_str(c.sock, s.name, "QUIT", c.user, ":Server has closed your connection.")
+            }
+            
             net.close(c.sock)
             destroy_user(&c)
             continue
@@ -525,11 +568,11 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
 
     // Capability Negotiation
     if mess.cmd == "CAP" {
+        fmt.println(mess)
         cap_mess = clone_message(mess, context.temp_allocator) or_return
+        assert(cap_mess.?.raw == mess.raw)
         mess, err = get_message(s, c)
         check_err(s, c, rb, err) or_return
-        
-        log.debug("Gotten Capability Negotiation. Ignoring.")
     }
 
     // Password
@@ -598,8 +641,9 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
     pop_net_buf(&c.net_buf)
 
     if mess, ok := cap_mess.?; ok {
-        when false {
-            cap_negotiation(s, c, rb, mess) or_return
+        when true {
+            capability_negotiation(s, c, mess) or_return
+
         } else {
             err := recv_data(&c.net_buf, c.sock)
             #partial switch v in err {
@@ -653,9 +697,10 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
     sync.barrier_wait(start_barrier)
     start_barrier = nil
 
-    c.to_send_alloc = context.allocator // TODO: Move to another allocator???
+    context.allocator = s.base_alloc
+    context.logger = s.base_logger
 
-    context.logger = base_logger
+    c.to_send_alloc = context.allocator // TODO: Move to another allocator???
 
     defer {
         sync.atomic_or(&c.flags, {.Quit})
@@ -681,7 +726,7 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
             case nil:
                 to_upper(mess.cmd)
                 log.debugf("Command \"%v\" gotten from \"%v\"", mess.cmd, c.user)
-
+                
                 switch mess.cmd {
                 case "INFO":    cmd_info(s, c, rb)
                 case "JOIN":    cmd_join(s, c, rb, mess)
@@ -736,6 +781,7 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
             case net.Network_Error:
                 tcp_err, ok := v.(net.TCP_Recv_Error)
                 if ok && tcp_err == .Timeout {
+                    // log.debug("Timeout from", c.nick)
                     break mess_loop
                 }
 
@@ -758,15 +804,17 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
 
         err := rb_send(rb)
 
-        sync.lock(&c.lock)
-        for mess in c.to_send {
-            rb_mess(rb, mess, context.temp_allocator)
-            delete(mess.raw, c.to_send_alloc)
+        if sync.try_lock(&c.lock) {
+            for mess in c.to_send {
+                rb_mess(rb, mess, context.temp_allocator)
+                delete(mess.raw, c.to_send_alloc)
+            }
+            clear(&c.to_send)
+            sync.unlock(&c.lock)
+
+            err = rb_send(rb)
         }
-
-        clear(&c.to_send)
-        sync.unlock(&c.lock)
-
+        
 
         if .Pinging in sync.atomic_load(&s.flags) {
             if .Pinged not_in sync.atomic_load(&c.flags) {
@@ -780,7 +828,7 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
                     }
                 }
 
-                rb_cmd_str(rb, s.name, "PING", string(hash[:]))
+                send_cmd_str(c.sock, s.name, "PING", string(hash[:]))
 
                 c.ping_token = strings.clone_from_bytes(hash[:])
                 sync.atomic_or(&c.flags, {.Pinged})
@@ -790,10 +838,14 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
             sync.atomic_or(&c.flags, {.Close})
         } 
 
-        err = rb_send(rb)
         
         if (Client_Flags{.Close, .Ping_Failed} & sync.atomic_load(&c.flags)) != {} {
-            rb_cmd_str(rb, s.name, "QUIT", c.user, ":QUIT: Server has closed your connection.")
+            if c.quit_mess != "" {
+                send_cmd_str(c.sock, s.name, "QUIT", c.user, c.quit_mess)
+            } else {
+                send_cmd_str(c.sock, s.name, "QUIT", c.user, ":QUIT: Server has closed your connection.")
+            }
+            
 
             for ch in c.chans {
                 sync.lock(&s.channs_lock)
@@ -816,6 +868,7 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
     }
 
     log.infof("Client thread for \"%v\" has ended.", c.full)
+    
 }
 
 
@@ -824,8 +877,10 @@ channel_thread :: proc(s: ^Server, c: ^Channel, _start_barrier: ^sync.Barrier) {
     sync.barrier_wait(start_barrier)
     start_barrier = nil
 
+    context.allocator = s.base_alloc
+    context.logger = s.base_logger
+
     c.to_send_alloc = context.allocator // TODO: Move to another allocator???
-    context.logger = base_logger
 
     defer {
         sync.atomic_or(&c.flags, {.Close})
@@ -860,7 +915,7 @@ channel_thread :: proc(s: ^Server, c: ^Channel, _start_barrier: ^sync.Barrier) {
             }
             sync.unlock(&s.client_lock)
 
-            for mess in c.to_send {
+            for mess in c.to_send do if mess.sender.full != user.full {
                 m := mess
                 if m.raw == "" {
                     m.raw = format_message(mess, user.to_send_alloc)
@@ -887,6 +942,42 @@ channel_thread :: proc(s: ^Server, c: ^Channel, _start_barrier: ^sync.Barrier) {
 }
 
 
+capability_negotiation :: proc(s: ^Server, c: ^Client, in_mess: Message) -> Error  {    
+    mess := in_mess
+    rb := Response_Buffer{sock = c.sock}
+    rb.data.allocator = context.temp_allocator
+
+    poison_buf: [uuid.EXPECTED_LENGTH]u8
+    poison := uuid.to_string_buffer(uuid.generate_v4(), poison_buf[:])
+    to_lower(poison)
+
+    for (poison in com.String_to_Capability_Map) {
+        poison = uuid.to_string_buffer(uuid.generate_v4(), poison_buf[:])
+        to_lower(poison)
+    }
+
+    log.debugf("Poisoned Capability %q", poison)
+
+    for {
+        fmt.println(mess)
+        done, err := cmd_cap(s, c, &rb, mess, poison)
+        if err != nil {
+            rb_send(&rb) or_return
+            return err
+        }
+
+        rb_send(&rb) or_return
+        if done { break }
+
+        mess, err = get_message(s, c)
+        if err != nil {
+            return err
+        }
+    }
+    return nil
+}
+
+
 reset_net_buf :: proc(n: ^Net_Buffer, zero := false) {
     n.peek = 0
     n.read = 0
@@ -896,6 +987,7 @@ reset_net_buf :: proc(n: ^Net_Buffer, zero := false) {
         mem.zero_explicit(&n.buf, len(n.buf))
     }
 }
+
 
 pop_net_buf :: proc(n: ^Net_Buffer, read_type: enum{None, First, Last, All} = .None) -> (err: Error) {
     if n.pos == 0 {
@@ -920,7 +1012,7 @@ pop_net_buf :: proc(n: ^Net_Buffer, read_type: enum{None, First, Last, All} = .N
 
         i = bytes.last_index(n.buf[:i], MESS_END)
         if i == -1 {
-            return IRC_Errors.No_End_Of_Message
+            i = 0
         }
 
         n.pos = i
@@ -947,6 +1039,7 @@ pop_net_buf :: proc(n: ^Net_Buffer, read_type: enum{None, First, Last, All} = .N
 }
 
 
+// Only reads what's currently in the Net_Buffer. Doesn't reach out for more data.
 peek_message :: proc(s: ^Server, c: ^Client, clone_mess := false) -> (mess: Message, err: Error) {
     mess, err = parse_message(&c.net_buf, context.temp_allocator, clone_mess, true)
 
@@ -978,9 +1071,9 @@ send_bytes :: proc(sock: net.TCP_Socket, buf: []u8) -> Error {
         return IRC_Errors.No_End_Of_Message
     }
 
-    n, err := net.send_tcp(sock, buf)
-    assert(n == len(buf))
-    return err
+    n := net.send_tcp(sock, buf) or_return
+    log.assertf(n == len(buf), "%v != %v;; mess = %q", n, len(buf), string(buf))
+    return nil
 }
 
 
@@ -1077,14 +1170,12 @@ rb_send :: proc(rb: ^Response_Buffer) -> Error {
         return nil
     }
 
-    n, err := net.send_tcp(rb.sock, rb.data[:])
-    assert(n == len(rb.data))
+    n := net.send_tcp(rb.sock, rb.data[:]) or_return
 
-    if err == nil {
-       clear(&rb.data)
-    }
+    log.assertf(n == len(rb.data), "%v != %v: mess = %q", n, len(rb.data), string(rb.data[:]))
+    clear(&rb.data)
 
-    return err
+    return nil
 }
 
 rb_cmd :: proc(rb: ^Response_Buffer, source: string, cmd: com.RC, params: ..string) -> (err: Error) {
@@ -1207,7 +1298,7 @@ recv_data :: proc(n_buf: ^Net_Buffer, sock: net.TCP_Socket) -> (err: net.Network
     for n_buf.pos < MAX_MESSAGE_SIZE {
         r, err = net.recv_tcp(sock, buf[:])
 
-        if r > 0 {
+        if 0 < r {
             n_buf.pos += copy(n_buf.buf[n_buf.pos:], buf[:r])
         }
 
@@ -1222,7 +1313,7 @@ recv_data :: proc(n_buf: ^Net_Buffer, sock: net.TCP_Socket) -> (err: net.Network
 }
 
 
-index_message :: proc(n: ^Net_Buffer, peek := false) -> (pos: int, err: Error) {
+index_message :: proc(n: ^Net_Buffer, consume := true, peek := false) -> (pos: int, err: Error) {
     if peek {
         if n.peek < n.read {
             n.peek = n.read
@@ -1230,30 +1321,26 @@ index_message :: proc(n: ^Net_Buffer, peek := false) -> (pos: int, err: Error) {
 
         if i := bytes.index(n.buf[n.peek:n.pos], MESS_END); i != -1 {
             if MESSAGE_SIZE < i {
-                err = IRC_Errors.User_Mess_To_Big
-                return
+                return 0, IRC_Errors.User_Mess_To_Big
             }
     
             pos = i
-            n.peek = i + len(MESS_END)
+            if consume { n.peek = i + len(MESS_END) } 
             
         } else {
-            err = IRC_Errors.No_End_Of_Message
-            return
+            return 0, IRC_Errors.No_End_Of_Message
         }
 
     } else if i := bytes.index(n.buf[n.read:n.pos], MESS_END); i != -1 {
         if MESSAGE_SIZE < i {
-            err = IRC_Errors.User_Mess_To_Big
-            return
+            return 0, IRC_Errors.User_Mess_To_Big
         }
 
         pos = i
-        n.read = i + len(MESS_END)
+        if consume { n.peek = i + len(MESS_END) } 
         
     } else {
-        err = IRC_Errors.No_End_Of_Message
-        return
+        return 0, IRC_Errors.No_End_Of_Message
     }
     
     return 
@@ -1262,13 +1349,15 @@ index_message :: proc(n: ^Net_Buffer, peek := false) -> (pos: int, err: Error) {
 
 parse_message :: proc{parse_message_str, parse_message_net_buf}
 
+
 parse_message_net_buf :: proc(n: ^Net_Buffer, alloc: runtime.Allocator, clone := false, peek := false) -> (mess: Message, err: Error) {
-    idx := index_message(n, peek) or_return
+    idx := index_message(n, peek = peek) or_return
     return parse_message_str(string(n.buf[:idx]), alloc, clone)
 }
 
+
 parse_message_str :: proc(str: string, alloc: runtime.Allocator, clone := false) -> (mess: Message, err: runtime.Allocator_Error) {
-    mess.raw = str
+    mess.raw = clone ? strings.clone(str) : str
     mess.recived = time.now()
 
     i: int
@@ -1323,10 +1412,10 @@ parse_message_str :: proc(str: string, alloc: runtime.Allocator, clone := false)
     // Code or Command check
     i = strings.index_byte(s, ' ')
     if i == -1 {
-        fmt.eprintln("Failed to parse Code or Command")
+        log.errorf("Failed to parse Code or Command: %q", mess.raw)
 
     } else if v, ok := strconv.parse_int(s[:i], 10); ok {
-        mess.code = com.Response_Codes(v)
+        mess.code = com.Response_Code(v)
         s = s[i+1:]
 
     } else {
@@ -1350,7 +1439,6 @@ parse_message_str :: proc(str: string, alloc: runtime.Allocator, clone := false)
 parse_params :: proc(params: string, alloc: runtime.Allocator) -> (res: []string, err: runtime.Allocator_Error) {
     // https://modern.ircdocs.horse/#parameters
     
-    // FIXME: Params can be seperated by one or more spaces
     buf := make([dynamic]string, 0, 15, alloc) or_return
     _params := params
 
@@ -1364,7 +1452,7 @@ parse_params :: proc(params: string, alloc: runtime.Allocator) -> (res: []string
     }
 
     if _params != "" {
-        append(&buf, params)
+        append(&buf, _params)
     }
 
     shrink(&buf)
@@ -1372,10 +1460,11 @@ parse_params :: proc(params: string, alloc: runtime.Allocator) -> (res: []string
     return buf[:], nil
 }
 
+
 clone_message :: proc(mess: Message, alloc: runtime.Allocator) -> (res: Message, err: runtime.Allocator_Error) {
-    raw := strings.clone(mess.cmd, alloc)
-    return parse_message(raw, alloc)
+    return parse_message(mess.raw, alloc, true)
 }
+
 
 format_message :: proc(mess: Message, alloc: runtime.Allocator) -> string {
     sb := strings.builder_make(0, 512, alloc)
