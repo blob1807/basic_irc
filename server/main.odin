@@ -5,12 +5,11 @@ import "core:mem"
 import "core:fmt"
 import "base:runtime"
 
-base_logger: runtime.Logger
-
+import com "../common"
 
 main :: proc() { 
-    base_logger = log.create_console_logger()
-    context.logger = base_logger
+    context.logger = log.create_console_logger()
+    defer log.destroy_console_logger(context.logger, runtime.default_allocator())
     
     /*
         track: mem.Tracking_Allocator
@@ -43,5 +42,8 @@ main :: proc() {
     s: Server
     init_server(&s, DEFAULT_ADDRESS)
     defer server_cleanup(&s)
+    // set_ctrl_hander()
     server_runner(&s)
+
+
 }
