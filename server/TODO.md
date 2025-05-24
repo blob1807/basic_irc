@@ -18,12 +18,13 @@
         - [ ] `admin`
 
 - [ ] More threading ya:
-    - [X] Atomic wrapper type
+    - [ ] Atomic wrapper type
     - [ ] Atomic wrapper procs
     - Server:
     - Client:
         - [ ] Thread proc
         - [ ] `to_send`   -> sync/chan
+        - [ ] Add messages to cache when can't send
     - Channel: 
         - [ ] Thread proc
         - [ ] `to_remove` -> sync/chan
@@ -34,9 +35,14 @@
 
 - [X] Remove virtual arenas from threads. Assume default temp alloc is used.
 
-- [~] Should `Message.cmd` be an enum???
+- [-] Should `Message.cmd` be an enum???
     - I remember thinking it wouldn't be worth it during parser because I'd
       still need to save the string on Unknown command.
-      Plus I'd still need check all values or use a map
+      Plus I'd still need check all values or use a map & 
+      I'm only checking the cmds once anyways.
 
 - [ ] Implement Capability Negotiation
+
+- [ ] Add rate limiting to Clients
+
+- [ ] Add Documentation :)
