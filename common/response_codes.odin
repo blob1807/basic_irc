@@ -164,7 +164,7 @@ Response_Code :: enum {
     ERR_SASLALREADY = 907,
 
     // IRCv3 Errors
-    ERR_INVALIDCAPCMD = 410
+    ERR_INVALIDCAPCMD = 410,
 }
 
 
@@ -388,6 +388,6 @@ Valid_Response_Codes := #sparse [Response_Code]bool {
     .ERR_SASLALREADY = true,
 
     // IRCv3 Errors
-    .ERR_INVALIDCAPCMD = true
+    .ERR_INVALIDCAPCMD = true,
 }
 
