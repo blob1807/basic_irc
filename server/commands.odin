@@ -1,21 +1,16 @@
 package basic_irc_server
 
-import "base:runtime"
 
-import "core:thread"
-import "core:sync"
+import "core:log"
 import "core:net"
 import "core:time"
-import "core:time/timezone"
-import "core:time/datetime"
-import "core:os"
-import "core:io"
-import "core:strconv"
+import "core:sync"
 import "core:slice"
+import "core:strconv"
 import "core:strings"
-import "core:fmt"
-import "core:sync/chan"
-import "core:log"
+import "core:time/timezone"
+
+@(require) import "core:fmt"
 
 import com "../common"
 
@@ -63,12 +58,16 @@ cmd_join :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
         out := Message {
             cmd = "JOIN",
             sender = {full = c.full,  type = .User},
-            params = make([]string, 1, ch.to_send_alloc) 
+            params = make([]string, 1, ch.to_send_alloc) ,
         }
         out.params[0] = chan_clone
-        
-        append(&ch.to_send, out)
+
+        sync.lock(&ch.lock)
         append(&ch.users, c) 
+        sync.unlock(&ch.lock)
+
+        try_to_send_to_chan(c, ch, out)
+        
         append(&c.chans, chan_clone)
         sync.unlock(&s.channs_lock)
 
@@ -112,12 +111,14 @@ cmd_kick :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
 
     sync.guard(&s.client_lock)
     for user in strings.split_after_iterator(&users, ",") {
-        cl, ok := s.clients[user]
-        if !ok || !slice.contains(chan.users[:], cl) {
+        cl, cl_ok := s.clients[user]
+        if !cl_ok || !slice.contains(chan.users[:], cl) {
             rb_cmd(rb, s.name, .ERR_USERNOTINCHANNEL, c.nick, user, chan_name, ":They aren't on that channe")
             continue
         }
         append(&chan.to_remove, cl)
+
+        // TODO: Do I need to propergate the message?
 
         rb_cmd_str(rb, c.nick, "KICK", chan_name, user, comment)
     }
@@ -141,15 +142,17 @@ cmd_list :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
     names := mess.params[0]
     rb_cmd(rb, s.name, .RPL_LISTSTART, c.nick, "Channel :Users Name")
 
+    sync.guard(&s.channs_lock)
     for name in strings.split_after_iterator(&names, ",") {
         if len(name) == 0 || name[0] != '#' {
             continue
         }
 
         chan := s.channels[name] or_continue
+        sync.guard(&chan.to_send_lock)
         
         buf: [20]u8
-        str := strconv.append_int(buf[:], i64(len(chan.users)), 10)
+        str := strconv.write_int(buf[:], i64(len(chan.users)), 10)
         rb_cmd(rb, s.name, .RPL_LIST, c.nick, chan.name, str)
     }
     rb_cmd(rb, s.name, .RPL_LISTEND, c.nick, ":End of /LIST")
@@ -166,7 +169,6 @@ cmd_lusers :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err: Error)
 
     users := i64(len(s.clients))
     chans := i64(len(s.channels))
-    //unkns := i64(len(s.new_clients))
 
     for _, v in s.clients {
         if .Op in v.flags {
@@ -178,52 +180,48 @@ cmd_lusers :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err: Error)
     }
 
     pos = copy(buf[:], ":There are ")
-    pos += len(strconv.append_int(buf[pos:], users, 10))
+    pos += len(strconv.write_int(buf[pos:], users, 10))
     pos += copy(buf[pos:], " users and ")
-    pos += len(strconv.append_int(buf[pos:], invis, 10))
+    pos += len(strconv.write_int(buf[pos:], invis, 10))
     pos += copy(buf[pos:], " on 1 server.")
     rb_cmd(rb, s.name, .RPL_LUSERCLIENT, c.nick, string(buf[:pos])) or_return
 
 
-    pos = len(strconv.append_int(buf[:], ops, 10))
+    pos = len(strconv.write_int(buf[:], ops, 10))
     pos += copy(buf[pos:], " :operators online.")
     rb_cmd(rb, s.name, .RPL_LUSEROP, c.nick, string(buf[:pos])) or_return
 
-
-    // pos = len(strconv.append_int(buf[:], unkns, 10))
-    // pos += copy(buf[pos:], " :unknown connections.")
-    // rb_cmd(rb, s.name, .RPL_LUSERUNKNOWN, c.nick, string(buf[:pos])) or_return
     rb_cmd(rb, s.name, .RPL_LUSERUNKNOWN, c.nick, "0 :unknown connections.") or_return
 
 
-    pos = len(strconv.append_int(buf[:], chans, 10))
+    pos = len(strconv.write_int(buf[:], chans, 10))
     pos += copy(buf[pos:], " :channels formed.")
     rb_cmd(rb, s.name, .RPL_LUSERCHANNELS, c.nick, string(buf[:pos])) or_return
 
 
     pos = copy(buf[:], ":I have ")
-    pos += len(strconv.append_int(buf[:], users, 10))
+    pos += len(strconv.write_int(buf[:], users, 10))
     pos += copy(buf[pos:], " clients and 1 server.")
     rb_cmd(rb, s.name, .RPL_LUSERME, c.nick, string(buf[:pos])) or_return
 
 
-    pos = len(strconv.append_int(buf[:], users, 10))
+    pos = len(strconv.write_int(buf[:], users, 10))
     buf[pos] = ' '; pos += 1
-    pos += len(strconv.append_int(buf[pos:], i64(s.stats.max_num_clients), 10))
+    pos += len(strconv.write_int(buf[pos:], i64(s.stats.max_num_clients), 10))
     t_pos = pos + 10 // len(" :Current ")
     pos += copy(buf[pos:], " :Current local users ")
-    pos += len(strconv.append_int(buf[:], users, 10))
+    pos += len(strconv.write_int(buf[:], users, 10))
     pos += copy(buf[pos:], " , max ")
-    pos += len(strconv.append_int(buf[pos:], i64(s.stats.max_num_clients), 10))
+    pos += len(strconv.write_int(buf[pos:], i64(s.stats.max_num_clients), 10))
     pos += 1
     rb_cmd(rb, s.name, .RPL_LOCALUSERS, c.nick, string(buf[:pos])) or_return
 
 
     pos = t_pos
     pos += copy(buf[pos:], "global users ") // use " :Current " from above
-    pos += len(strconv.append_int(buf[:], users, 10))
+    pos += len(strconv.write_int(buf[:], users, 10))
     pos += copy(buf[pos:], " , max ")
-    pos += len(strconv.append_int(buf[pos:], i64(s.stats.max_num_clients), 10))
+    pos += len(strconv.write_int(buf[pos:], i64(s.stats.max_num_clients), 10))
     pos += 1
     rb_cmd(rb, s.name, .RPL_GLOBALUSERS, c.nick, string(buf[:pos])) or_return
 
@@ -276,14 +274,16 @@ cmd_names :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -
         
         pos: int
         sync.guard(&s.client_lock)
+        sync.guard(&chan.lock)
+
         for pos < len(chan.users) {
             strings.write_byte(&sb, ':')
 
             for /**/; pos < len(chan.users); pos += 1 {
                 user := chan.users[pos]
-                ok := user.user in s.clients
+                cl_ok := user.user in s.clients
 
-                if ok && .Invisable not_in user.flags {
+                if cl_ok && .Invisable not_in user.flags {
                     if len(sb.buf) + len(user.full) + 1 > left {
                         break
                     }
@@ -323,17 +323,7 @@ cmd_nick :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
         return
     }
 
-    if c.nick != "" {
-        delete_key(&s.nicks, c.nick)
-        assert(c.nick not_in s.nicks)
-        delete(c.nick)
-    }
-
-    c.nick = strings.clone(nick)
-    sync.guard(&s.nick_lock)
-    s.nicks[c.nick] = c.user
-    assert(c.nick in s.nicks)
-
+    c.nick = strings.clone(nick, s.base_alloc)
     return
 }
 
@@ -368,7 +358,7 @@ cmd_part :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
         to_send := Message{
             sender = {full = c.full, type = .User},
             cmd = "PART",
-            params = make([]string, 2, chan.to_send_alloc)
+            params = make([]string, 2, chan.to_send_alloc),
         }
         to_send.params[0] = chan.name
 
@@ -377,7 +367,9 @@ cmd_part :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
         }
 
         rb_mess(rb, to_send, context.temp_allocator)
-        append(&chan.to_send, to_send)
+
+        try_to_send_to_chan(c, chan, to_send)
+        
         append(&chan.to_remove, c)
         unordered_remove(&c.chans, i)
     }
@@ -446,7 +438,7 @@ cmd_privmsg :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message)
 
     tail := mess.tail
     if tail != "" && tail[0] != ':' {
-        tail = strings.concatenate({":", tail}, context.temp_allocator) or_return
+        tail = strings.concatenate({":", tail}, context.temp_allocator)
     }
 
     for tar in targets {
@@ -463,18 +455,16 @@ cmd_privmsg :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message)
         chan, ok := s.channels[tar]
         sync.unlock(&s.channs_lock)
 
-        if ok {
-            sync.guard(&chan.lock)
-            to_send.params = make([]string, 1, chan.to_send_alloc) or_return
-            to_send.params[0] = chan.name
-            to_send.tail = strings.clone(tail, chan.to_send_alloc) or_return
-
-            append(&chan.to_send, to_send) or_return
+        if !ok {
+            rb_cmd(rb, s.name, .ERR_NOSUCHCHANNEL, c.nick, tar, ":Cannot send to channel")
             continue
         }
 
-        rb_cmd(rb, s.name, .ERR_NOSUCHCHANNEL, c.nick, tar, ":Cannot send to channel")
-        
+        to_send.params = make([]string, 1, chan.to_send_alloc)
+        to_send.params[0] = chan.name
+        to_send.tail = strings.clone(tail, chan.to_send_alloc)
+
+        try_to_send_to_chan(c, chan, to_send)
     }
         
     return 
@@ -486,23 +476,28 @@ cmd_quit :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
     if len(mess.params) != 0 {
         tail = strings.concatenate(
             {tail, mess.params[0]}, 
-            context.temp_allocator
+            context.temp_allocator,
         )
     }
 
-    to_send := Message {
+    to_send_base := Message {
         sender = {full = c.full},
         cmd = "QUIT",
         tail = tail,
-    }   
+    }
+
+    to_send_base.raw = format_message(to_send_base, context.temp_allocator)
 
     for name in c.chans {
         sync.guard(&s.channs_lock)
-        ch := (s.channels[name]) or_continue
+        ch := s.channels[name] or_continue
 
-        to_send.raw = format_message(to_send, ch.to_send_alloc)
-        sync.guard(&ch.lock)
+        to_send: Message
+        to_send.raw = strings.clone(to_send.raw, ch.to_send_alloc)
+
+        sync.guard(&ch.to_send_lock)
         append(&ch.to_send, to_send)
+        
         append(&ch.to_remove, c)
     }
 
@@ -513,13 +508,13 @@ cmd_quit :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
 cmd_time :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err: Error) {
     basic :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, ts: time.Time) -> (err: Error) {
         ts_buf: [21]u8
-        ts_str := strconv.append_int(ts_buf[:], ts._nsec, 10)
+        ts_str := strconv.write_int(ts_buf[:], ts._nsec, 10)
 
         ymd_buf: [32]u8
         ymd := time.to_string_yyyy_mm_dd(ts, ymd_buf[:])
     
         hms_buf: [32]u8
-        hms := time.to_string_hms_12(ts, ymd_buf[:])
+        hms := time.to_string_hms_12(ts, hms_buf[:])
     
         dt_buf: [64]u8 = {0 = ':'}
         p := 1
@@ -553,7 +548,7 @@ cmd_time :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err: Error) {
     dt_str := timezone.datetime_to_str(dt, context.temp_allocator)
 
     ts_buf: [21]u8
-    ts_str := strconv.append_int(ts_buf[:], ts._nsec, 10)
+    ts_str := strconv.write_int(ts_buf[:], ts._nsec, 10)
 
     return rb_cmd(rb, s.name, .RPL_TIME, c.nick, s.name, ts_str, ":", dt_str)
 }
@@ -591,11 +586,25 @@ cmd_user :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
     }
 
     if len(user) > s.i_support.user_len {
-        user = user[:s.i_support.user_len]
+        idx := trucate_to_grapheme(user, s.i_support.user_len)
+        if idx == -1 {
+            idx = trucate_to_rune(user, s.i_support.user_len)
+            if idx == -1 {
+                idx = s.i_support.user_len
+            }
+        }
+        user = user[:idx]
     }
 
     if len(real) > s.i_support.user_len {
-        real = real[:s.i_support.user_len]
+        idx := trucate_to_grapheme(user, s.i_support.user_len)
+        if idx == -1 {
+            idx = trucate_to_rune(user, s.i_support.user_len)
+            if idx == -1 {
+                idx = s.i_support.user_len
+            }
+        }
+        real = real[:idx]
     }
 
     c.user = strings.clone(user)
@@ -635,9 +644,10 @@ cmd_who :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> 
     }
 
     sync.guard(&s.client_lock)
+    sync.guard(&chan.lock)
     for user in chan.users {
         sync.guard(&user.lock)
-        if user.user not_in s.clients{
+        if user.user not_in s.clients {
             continue
         }
 
@@ -672,14 +682,14 @@ cmd_whois :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -
     rb_cmd(
         rb, s.name, .RPL_WHOISUSER, 
         c.nick, nick, name, s.name, 
-        strings.concatenate({"* :", user.real}, context.temp_allocator)
+        strings.concatenate({"* :", user.real}, context.temp_allocator),
     )
     
     info := strings.concatenate({
         ":Server Version " + VERSION,
         ":Server Time", format_server_time(s.info.tz, context.temp_allocator),
         ":Created by blob1807",
-        ":Main repo https://github.com/blob1807/basic-irc"
+        ":Main repo https://github.com/blob1807/basic-irc",
     })
 
     rb_cmd(rb, s.name, .RPL_WHOISSERVER, c.nick, nick, s.name, info)
@@ -721,7 +731,7 @@ cmd_cap :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message, poi
         if strings.contains(to_lower(mess.tail), poison) {
             c.quit_mess = strings.concatenate(
                 {":Requesting the \"", poison, "\"client capability is forbidden"}, 
-                context.temp_allocator
+                context.temp_allocator,
             )
             c.flags += {.Close}
             return true, IRC_Errors.Capability_Failed

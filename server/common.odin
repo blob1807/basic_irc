@@ -4,13 +4,17 @@ import "base:runtime"
 
 import "core:mem"
 import "core:net"
+import "core:sync"
 import "core:time"
 import "core:thread"
 import "core:strings"
-import "core:reflect"
+import "core:unicode/utf8"
 import "core:time/timezone"
 import "core:time/datetime"
 import "core:encoding/json"
+
+@(require) import "core:fmt"
+
 
 import com "../common"
 
@@ -64,8 +68,8 @@ format_i_support :: proc(i: I_Support, alloc := context.allocator) -> (res: stri
 
 // takes a json file as a `[]u8` & write the config to a `^Server`. 
 // setting default for anything unset.
-load_config :: proc(buf: []u8, s: ^Server, alloc := context.allocator) -> (err: Error) {
-    context.allocator = alloc
+load_config :: proc(buf: []u8, s: ^Server) -> (err: Error) {
+    context.allocator = s.base_alloc
 
     c: Config
     json.unmarshal_any(buf, &c) or_return
@@ -202,6 +206,7 @@ start_timer :: proc "contextless" (t: ^Timer) {
 
 stop_timer :: proc "contextless" (t: ^Timer) {
     t.left = 0
+    t.last = {}
 }
 
 timer_ended :: proc "contextless" (t: Timer) -> bool {
@@ -238,13 +243,116 @@ to_upper :: proc "contextless" (str: string) -> string {
 }
 
 
+/*
+Tries to get the byte index to safely trucate the input string to the end 
+of the closest grapheme less then or equal to the given byte index.
+
+Returns `-1` if no valid index is found.
+*/
+trucate_to_grapheme :: proc(str: string, byte_idx: int) -> (res: int) {
+    if len(str) <= byte_idx {
+        return max(0, len(str))
+    }
+
+    graphemes, _, _, _ := utf8.decode_grapheme_clusters(str, allocator = context.temp_allocator)
+
+    switch len(graphemes) {
+    case 0: return -1
+    case 1: return len(str)
+    }
+
+    res = -1
+    cur := graphemes[0].byte_index
+
+    for g in graphemes[1:] {
+        if byte_idx < g.byte_index {
+            break
+        }
+        res = cur
+        cur = g.byte_index
+    }
+
+    return res > byte_idx ? -1 : res
+}
+
+
+/*
+Tries to get the byte index to safely trucate the input string to the end 
+of the closest rune less then or equal to the given byte index.
+
+Returns `-1` if no valid index is found.
+*/
+trucate_to_rune :: proc(str: string, byte_idx: int) -> (res: int) {
+    if len(str) <= byte_idx {
+        return max(0, len(str))
+    }
+    res = -1
+    pos: int
+
+    for pos < len(str) {
+        _, n := utf8.decode_rune_in_string(str[pos:])
+        pos += n
+
+        if byte_idx < pos+1 {
+            break
+        }
+        res = pos+1
+    }
+
+    return res > byte_idx ? -1 : res
+}
+
+
+
+/*
+Tries to get the byte index to safely trucate the input string to the end 
+of first the closest grapheme then rune less then or equal to the given byte index.
+
+Returns `byte_idx` if no valid index is found.
+*/
+safe_trucate :: proc(str: string, byte_idx: int) -> (res: int) {
+    n := trucate_to_grapheme(str, byte_idx)
+    if n != -1 {
+        return n
+    }
+
+    n = trucate_to_rune(str, byte_idx)
+    if n != -1 {
+        return n
+    }
+
+    return byte_idx
+}
+
+
+
+try_to_send_to_chan :: proc(c: ^Client, chan: ^Channel, mess: Message) {
+    if .Close in sync.atomic_load(&chan.flags) {
+        return
+    }
+
+    if sync.try_lock(&chan.to_send_lock) {
+        append(&chan.to_send, mess)
+        sync.unlock(&chan.to_send_lock)
+        return
+    }
+
+    to_send := Cached_Message {
+        mess = mess,
+        dest = chan.name,
+    }
+    append(&c.mess_cache, to_send)
+}
+
+
+
 format_server_time :: proc(tz: ^datetime.TZ_Region, alloc: runtime.Allocator) -> string {
     basic :: proc(ts: time.Time) -> string {
         ymd_buf: [32]u8
         ymd := time.to_string_yyyy_mm_dd(ts, ymd_buf[:])
     
         hms_buf: [32]u8
-        hms := time.to_string_hms_12(ts, ymd_buf[:])
+        hms := time.to_string_hms_12(ts, hms_buf[:])
     
         dt_buf: [64]u8
         p := copy(dt_buf[:], ymd)
@@ -255,7 +363,7 @@ format_server_time :: proc(tz: ^datetime.TZ_Region, alloc: runtime.Allocator) ->
         p += 1
         dt_str := string(dt_buf[:p])
     
-        return strings.concatenate({ymd, hms, dt_str})
+        return strings.clone(dt_str)
     }
     context.allocator = alloc
     
@@ -296,7 +404,7 @@ destroy_i_support :: proc(s: ^Server, alloc := context.allocator) {
 }
 
 
-destroy_user :: proc(c: ^Client, alloc := context.allocator) {
+destroy_client :: proc(c: ^Client, alloc := context.allocator) {
     context.allocator = alloc
     if c.thread != nil {
         thread.terminate(c.thread, 0)
@@ -313,6 +421,16 @@ destroy_user :: proc(c: ^Client, alloc := context.allocator) {
     delete(c.real)
     delete(c.chans)
     delete(c.ping_token)
+
+    for mess in c.mess_cache {
+        destroy_message(mess)
+    }
+    delete(c.mess_cache)
+
+    for mess in c.to_send {
+        destroy_message(mess)
+    }
+    delete(c.to_send)
     
     mem.zero(c, size_of(Client))
 }

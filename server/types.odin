@@ -3,17 +3,14 @@ package basic_irc_server
 import "base:runtime"
 import ir "base:intrinsics"
 
-import "core:thread"
-import "core:sync"
-import "core:net"
-import "core:time"
-import "core:time/timezone"
-import "core:time/datetime"
 import "core:os"
 import "core:io"
+import "core:net"
+import "core:sync"
+import "core:time"
+import "core:thread"
+import "core:time/datetime"
 import "core:encoding/json"
-import "core:mem/virtual"
-import "core:sync/chan"
 
 import "../common"
 
@@ -27,7 +24,12 @@ NET_BUFFER_SIZE :: MAX_MESSAGE_SIZE + NET_READ_SIZE
 
 NET_RECEV_TIMEOUT    :: time.Millisecond * 1000
 CLIENT_CHECK_TIMEOUT :: time.Millisecond * 50
-ONBOARD_TIMEOUT      :: time.Second
+ONBOARD_TIMEOUT      :: time.Second * 30
+
+SERVER_THREAD_TIMEOUT  :: time.Millisecond * 10
+CLIENT_THREAD_TIMEOUT  :: time.Millisecond * 50
+CHANNEL_THREAD_TIMEOUT :: time.Millisecond * 50
+
 
 @(rodata)
 MESS_END      := []byte{'\r', '\n'}
@@ -99,7 +101,7 @@ IRC_Errors :: enum {
     Registration_Failed,
     Capability_Failed,
 
-    Server_Force_Quit
+    Server_Force_Quit,
 }
 
 Error :: union #shared_nil { 
@@ -136,14 +138,14 @@ Timer :: struct {
 
 
 Thread_Flag :: enum {
-    Has_Closed,
+    Has_Closed, Closeing,
 }
 
 Thread_Flags :: bit_set[Thread_Flag]
 
 
 Server_Flag :: enum {
-    Pinging
+    Pinging,
 }
 
 Server_Flags :: bit_set[Server_Flag]
@@ -216,10 +218,10 @@ Client_Flag :: enum {
 Client_Flags :: bit_set[Client_Flag]
 
 Client :: struct {
-    nick: string,
-    user: string, 
-    real: string,
-    full: string,
+    nick: string `fmt:"q"`,
+    user: string `fmt:"q"`, 
+    real: string `fmt:"q"`,
+    full: string `fmt:"q"`,
 
     sock: net.TCP_Socket,
     ep:   net.Endpoint, 
@@ -233,9 +235,11 @@ Client :: struct {
     pinged: time.Tick,
 
     chans:   [dynamic]string,
-    to_send: [dynamic]Message, // TODO: Swap to a sync/chan
-    // to_send: chan.Chan(Message),
-    mess_cache: [dynamic]Delayed_Message,
+    to_send: [dynamic]Message, 
+    to_send_lock: sync.Mutex,
+
+    // Messages WILL have their `raw` field allocated to the dest's allocator
+    mess_cache: [dynamic]Cached_Message,
 
     to_send_alloc: runtime.Allocator,
 
@@ -243,7 +247,9 @@ Client :: struct {
     thread_flags: Thread_Flags, // atomic
     lock: sync.Mutex,
 
-    quit_mess: string,
+    quit_mess: string `fmt:"q"`,
+
+    cleanup_check_count: int,
 }
 
 
@@ -257,7 +263,7 @@ Channel_Mode :: enum {
     Ban, Exception, Client_Limit, 
     Invite_Only, Invite_Exception, 
     Key, Moderated, Secret, 
-    Protected_Topic, No_Exteral_Messages 
+    Protected_Topic, No_Exteral_Messages,
 }
 
 Channel_Modes :: bit_set[Channel_Mode]
@@ -267,10 +273,9 @@ Channel :: struct {
     admin: [dynamic]string,  // usernames
     users: [dynamic]^Client,
 
-    to_remove: [dynamic]^Client, // TODO: Swap to a sync/chan
-    to_send:   [dynamic]Message, // TODO: Swap to a sync/chan
-    // to_remove: chan.Chan(^Client),
-    // to_send:   chan.Chan(Message),
+    to_remove: [dynamic]^Client, 
+    to_send:   [dynamic]Message, 
+    to_send_lock: sync.Mutex,
 
     to_send_alloc: runtime.Allocator,
 
@@ -286,7 +291,7 @@ Channel :: struct {
 
 
 Sender_Type :: enum {
-    None, Invalid, Server, Self, User, Sys, Sys_Err
+    None, Invalid, Server, Self, User, Sys, Sys_Err,
 }
 
 Sender :: struct {
@@ -302,12 +307,12 @@ Message :: struct {
     sender:  Sender,
     cmd:     string `fmt:"q"`,
     code:    common.Response_Code,
-    params:  []string, // Allocated to context.temp_allocator
+    params:  []string,
     tail:    string `fmt:"q"`,
 }
 
 
-Delayed_Message :: struct {
+Cached_Message :: struct {
     using mess: Message,
     dest:  string `fmt:"q"`,
     delay: Timer,
@@ -346,7 +351,7 @@ Config :: struct {
     timers: struct {
         ping:           time.Duration,
         ping_check:     time.Duration,
-        client_cleanup: time.Duration
+        client_cleanup: time.Duration,
     },
 
     i_support: I_Support,
