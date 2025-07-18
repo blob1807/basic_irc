@@ -126,7 +126,6 @@ Net_Buffer :: struct {
     buf:  [NET_BUFFER_SIZE]byte `fmt:"q,pos"`,
     pos:  int, // amount writen
     read: int, // amount read
-    peek: int, // amount peeked
 }
 
 

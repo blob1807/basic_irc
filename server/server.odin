@@ -16,12 +16,12 @@ import "core:thread"
 import "core:strings"
 import "core:strconv"
 import "core:reflect"
-import "core:sync/chan"
 import "core:mem/virtual"
 import "core:time/timezone"
 import "core:encoding/uuid"
 
 import com "../common"
+
 
 
 // WARNING THIS WILL NOT DO ANY CLEAN UP!!! IT WILL CAUSE MEMORY LEAKS & LEAVE THREADS OPEN!!!
@@ -35,13 +35,14 @@ FORCE_CLOSE_SERVER: bool = false
 
 
 
-// inits a server with default settings.
+// inits a server with default settings & zeros it.
 init_server :: proc(
     s: ^Server, addr: string, 
     name := DEFAULT_NAME, network := DEFAULT_NETWORK, set_i_support := true,
     allocator := context.allocator, logger := context.logger,
 ) -> (err: Error) {
     context.allocator = allocator
+    runtime.mem_zero(s, size_of(Server))
 
     s.name = name
     s.address = addr
@@ -74,7 +75,7 @@ init_server :: proc(
 
 server_cleanup :: proc(s: ^Server, free_i_support := true) {
     for _, &c in s.clients {
-        destroy_user(c)
+        destroy_client(c)
         free(c)
     }
     delete(s.clients)
@@ -172,208 +173,44 @@ server_runner :: proc(s: ^Server) -> (err: Error) {
         }
 
         defer free_all(context.temp_allocator)
-        // handle clients
-        // handle channels
-        // do pinging
-        // free memory
-
-        /*
-        sync.lock(&s.client_lock)
-        for k, &c in s.clients {
-            // get data
-            // send data
-            // close client
-            rb := &Response_Buffer {
-                c.sock, 
-                make([dynamic]u8, context.temp_allocator)
-            }
-
-            mess_loop: for c.flags & {.Close, .Quit} == {} {
-                mess, m_err := get_message(s, c)
-
-                #partial switch v in m_err {
-                case nil:
-                    to_upper(mess.cmd)
-                    log.debugf("Received: \"%v\" gotten from \"%v\"; %q", mess.cmd, c.user, mess.raw)
-
-                    switch mess.cmd {
-                    case "INFO":    cmd_info(s, c, rb)
-                    case "JOIN":    cmd_join(s, c, rb, mess)
-                    case "KICK":    cmd_kick(s, c, rb, mess)
-                    case "KILL":    cmd_kill(s, c, rb, mess)
-                    case "LIST":    cmd_list(s, c, rb, mess)
-                    case "LUSERS":  cmd_lusers(s, c, rb)
-                    case "MOTD":    cmd_motd(s, c, rb)
-                    case "NAMES":   cmd_names(s, c, rb, mess)
-                    case "NICK":    cmd_nick(s, c, rb, mess)
-                    case "PART":    cmd_part(s, c, rb, mess)
-                    case "PING":    cmd_ping(s, c, rb, mess)
-                    case "PONG":    cmd_pong(s, c, rb, mess)
-                    case "PRIVMSG": cmd_privmsg(s, c, rb, mess)
-                    case "TIME":    cmd_time(s, c, rb)
-                    case "USER":    cmd_user(s, c, rb, mess)
-                    case "VERSION": cmd_version(s, c, rb)
-                    case "WHO":     cmd_who(s, c, rb, mess)
-                    case "WHOIS":   cmd_whois(s, c, rb, mess)
-                    case "QUIT": 
-                        cmd_quit(s, c, rb, mess)
-                        c.flags += {.Quit}
-                        
-                    case:
-                        rb_cmd(rb, s.name, .ERR_UNKNOWNCOMMAND, c.user, ":Unsupported message type.", mess.cmd)
-                    }
-
-                    if mess.code != .None {
-                        sb := strings.builder_make(context.temp_allocator)
-                        strings.write_string(&sb, ":Unsupported message type. \"")
-                        strings.write_string(&sb, reflect.enum_string(mess.code))
-                        strings.write_byte(&sb, '"')
-                        
-                        rb_cmd(rb, s.name, .ERR_UNKNOWNCOMMAND, c.user, strings.to_string(sb))
-                    }
-
-                case IRC_Errors:
-                    #partial switch v {
-                    case .No_End_Of_Message:
-                        rb_cmd_str(rb, s.name, "ERROR", c.user, ":No end of message was found.")
-                    case .User_Mess_To_Big:
-                        rb_cmd(rb, s.name, .ERR_INPUTTOOLONG, c.user, ":Input line was too long.")
-                    }
-                    if .Errored in c.flags {
-                        c.flags += {.Close}
-                    }
-                    c.flags += {.Errored}
-
-                case net.Network_Error:
-                    tcp_err, ok := v.(net.TCP_Recv_Error)
-                    if ok && tcp_err == .Timeout {
-                        break mess_loop
-                    }
-
-                    log.error("Failed to get data from client", c.user, v)
-                    if .Errored in c.flags {
-                        c.flags += {.Close}
-                    }
-                    c.flags += {.Errored}
-
-                case:
-                    log.error("Failed to get data from client", c.user, m_err)
-                    if .Errored in c.flags {
-                        c.flags += {.Close}
-                    }
-                    c.flags += {.Errored}
-                }
-            }
-
-            if len(rb.data) != 0 {
-                log.debugf("Sending:  %q", string(rb.data[:]))
-            }
-            err = rb_send(rb)
-
-            if .Pinging in s.flags {
-                if .Pinged not_in c.flags {
-                    hash: [128]u8
-                    crypto.rand_bytes(hash[:])
-                    
-                    for &b in hash {
-                        switch b {
-                        case ' ', ':', '\r', '\n', '\x00':
-                            b = '_'
-                        }
-                    }
-
-                    rb_cmd_str(rb, s.name, "PING", string(hash[:]))
-
-                    c.ping_token = strings.clone_from_bytes(hash[:])
-                    c.flags += {.Pinged}
-                }
-
-            } else {
-                if .Pinged in c.flags {
-                    c.flags += {.Close}
-                } 
-            }
-            
-            if (Client_Flags{.Close, .Ping_Failed} & c.flags) != {} {
-                rb_cmd_str(rb, s.name, "QUIT", c.user, ":QUIT: Server has closed your connection.")
-
-                for ch in c.chans {
-                    v, ok := s.channels[ch]
-                    if ok {
-                        append(&v.to_remove, c)
-
-                        to_send := Message {
-                            sender = {full=strings.clone(c.full, context.temp_allocator)},
-                            cmd = "QUIT",
-                            tail = ":QUIT: Sever has closed the connection.",
-                        }
-                        append(&v.to_send, to_send)
-                    }
-                }
-                c.flags += {.Quit}
-            }
-        }
-        sync.unlock(&s.client_lock)
-
-        sync.lock(&s.channs_lock)
-        for k, &c in s.channels {
-            // remove users
-            // propagate data
-
-            for cl in c.to_remove {
-                i, ok := slice.linear_search(c.users[:], cl)
-                if ok {
-                    unordered_remove(&c.users, i)
-                }
-            }
-            clear(&c.to_remove)
-
-            for m in c.to_send {
-                #reverse for cl, pos in c.users { 
-                    sync.guard(&s.client_lock)
-
-                    if cl.user in s.clients {
-                        if m.sender.full == cl.full {
-                            continue
-                        }
-                        buf: []string 
-                        
-                        if m.tail == "" {
-                            buf = make([]string, len(m.params), context.temp_allocator)
-                        } else {
-                            buf = make([]string, len(m.params) + 1, context.temp_allocator)
-                            buf[len(buf) - 1] = m.tail
-                        }
-
-                        copy(buf, m.params)
-                        log.debugf("Sending %v to %q", m, cl.user)
-                        
-                        if m.code != .None {
-                            send_cmd(cl.sock, m.sender.full, m.code, ..buf)
-                        } else {
-                            send_cmd_str(cl.sock, m.sender.full, m.cmd, ..buf)
-                        }
-
-                    } else {
-                        unordered_remove(&c.users, pos)
-                    }
-                }
-                
-            }
-            clear(&c.to_send)
-        }
-        sync.unlock(&s.channs_lock)
-        */
 
         if update_timer(&s.timers.client_cleanup) {
             sync.lock(&s.client_lock)
             for k, &c in s.clients {
-                if .Quit in sync.atomic_load(&c.flags) || thread.is_done(c.thread) {
+                clean_up: bool
+
+                if .Closeing in sync.atomic_load(&c.thread_flags) {
+                    if c.cleanup_check_count >= 5 {
+                        thread.terminate(c.thread, 0)
+                        thread.destroy(c.thread)
+                        clean_up = true
+                        
+                    } else {
+                        c.cleanup_check_count += 1
+                    }
+                }
+
+                if thread.is_done(c.thread) {
+                    if .Has_Closed not_in sync.atomic_load(&c.thread_flags) {
+                        clean_up = true
+                    }
+                    thread.destroy(c.thread)
+
+                } else if .Quit in sync.atomic_load(&c.flags) {
+                    if .Has_Closed in sync.atomic_load(&c.thread_flags) \
+                    || c.cleanup_check_count >= 5 {
+                        thread.terminate(c.thread, 0)
+                        thread.destroy(c.thread)
+                        clean_up = true
+                        
+                    } else {
+                        c.cleanup_check_count += 1
+                    }
+                }
+
+                if clean_up {
                     net.close(c.sock)
                     c.sock = 0
-
-                    thread.terminate(c.thread, 0)
-                    thread.destroy(c.thread)
     
                     delete_key(&s.nicks, c.nick)
                     assert(c.nick not_in s.nicks)
@@ -383,6 +220,18 @@ server_runner :: proc(s: ^Server) -> (err: Error) {
                     delete(c.nick)
                     delete(c.chans)
                     delete(c.ping_token)
+
+                    for mess in c.mess_cache {
+                        destroy_message(mess)
+                    }
+                    delete(c.mess_cache)
+
+                    sync.lock(&c.to_send_lock)
+                    for mess in c.to_send {
+                        destroy_message(mess)
+                    }
+                    delete(c.to_send)
+                    sync.unlock(&c.to_send_lock)
     
                     delete_key(&s.clients, k)
                     assert(k not_in s.clients)
@@ -407,11 +256,21 @@ server_runner :: proc(s: ^Server) -> (err: Error) {
             }
 
         } else {
-            if false && update_timer(&s.timers.ping_check) {
+            if update_timer(&s.timers.ping_check) {
+                sync.lock(&s.client_lock)
+                for _, &c in s.clients {
+                    if .Pinged not_in sync.atomic_load(&c.flags) {
+                        sync.atomic_add(&c.flags, {.Ping_Failed})
+                    }
+                }
+                sync.unlock(&s.client_lock)
+
                 reset_timer(&s.timers.ping)
                 s.flags -= {.Pinging}
             } 
         }
+
+        time.accurate_sleep(SERVER_THREAD_TIMEOUT)
     }
 
     sync.atomic_store(&s.close_new_client_thread, true)
@@ -461,6 +320,8 @@ server_runner :: proc(s: ^Server) -> (err: Error) {
 
 
 open_new_clients_thread :: proc(s: ^Server) {
+    assert(context.temp_allocator.procedure == runtime.default_temp_allocator_proc)
+
     context.logger = s.base_logger
     context.allocator = s.base_alloc
     context.random_generator = crypto.random_generator()
@@ -481,7 +342,7 @@ open_new_clients_thread :: proc(s: ^Server) {
 
         rb := &Response_Buffer {
             sock = c_sock,
-            data = make([dynamic]u8, context.temp_allocator)
+            data = make([dynamic]u8, context.temp_allocator),
         }
 
         c := Client{sock=c_sock, ep=source}
@@ -497,7 +358,7 @@ open_new_clients_thread :: proc(s: ^Server) {
             }
             
             net.close(c.sock)
-            destroy_user(&c)
+            destroy_client(&c)
             continue
         }
 
@@ -568,9 +429,7 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
 
     // Capability Negotiation
     if mess.cmd == "CAP" {
-        fmt.println(mess)
         cap_mess = clone_message(mess, context.temp_allocator) or_return
-        assert(cap_mess.?.raw == mess.raw)
         mess, err = get_message(s, c)
         check_err(s, c, rb, err) or_return
     }
@@ -594,7 +453,7 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
 
             cmds += {.Nick}
             start = time.tick_now()
-            log.debug("NICK command gotten")
+            // log.debug("NICK command gotten")
     
         case "USER":
             cmd_user(s, c, rb, mess)
@@ -602,7 +461,7 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
             
             cmds += {.User}
             start = time.tick_now()
-            log.debug("USER command gotten")
+            // log.debug("USER command gotten")
     
         case: 
             if cmds == {.Nick, .User} {
@@ -640,9 +499,9 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
 
     pop_net_buf(&c.net_buf)
 
-    if mess, ok := cap_mess.?; ok {
+    if _mess, ok := cap_mess.?; ok {
         when true {
-            capability_negotiation(s, c, mess) or_return
+            capability_negotiation(s, c, _mess) or_return
 
         } else {
             err := recv_data(&c.net_buf, c.sock)
@@ -693,6 +552,8 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
 
 
 client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
+    assert(context.temp_allocator.procedure == runtime.default_temp_allocator_proc)
+
     start_barrier := _start_barrier
     sync.barrier_wait(start_barrier)
     start_barrier = nil
@@ -700,7 +561,7 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
     context.allocator = s.base_alloc
     context.logger = s.base_logger
 
-    c.to_send_alloc = context.allocator // TODO: Move to another allocator???
+    c.to_send_alloc = s.base_alloc
 
     defer {
         sync.atomic_or(&c.flags, {.Quit})
@@ -709,14 +570,16 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
 
     log.infof("Client thread for \"%v\" has started.", c.full)
 
-    for !sync.atomic_load(&s.close_client_threads) \ 
+    main_loop: for !sync.atomic_load(&s.close_client_threads) \ 
     && (.Quit not_in sync.atomic_load(&c.flags)) {
 
         defer free_all(context.temp_allocator)
 
+        time.accurate_sleep(CLIENT_THREAD_TIMEOUT)
+
         rb := &Response_Buffer {
             c.sock, 
-            make([dynamic]u8, context.temp_allocator)
+            make([dynamic]u8, context.temp_allocator),
         }
 
         mess_loop: for sync.atomic_load(&c.flags) & {.Close, .Quit} == {} {
@@ -748,7 +611,10 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
                 case "WHOIS":   cmd_whois(s, c, rb, mess)
                 case "QUIT": 
                     cmd_quit(s, c, rb, mess)
+                    clear(&c.chans)
+                    rb_send(rb)
                     sync.atomic_or(&c.flags, {.Quit})
+                    break main_loop
                     
                 case:
                     rb_cmd(rb, s.name, .ERR_UNKNOWNCOMMAND, c.user, ":Unsupported message type.", mess.cmd)
@@ -804,17 +670,17 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
 
         err := rb_send(rb)
 
-        if sync.try_lock(&c.lock) {
+        if sync.try_lock(&c.to_send_lock) {
             for mess in c.to_send {
+                log.debug(c.user, mess)
                 rb_mess(rb, mess, context.temp_allocator)
                 delete(mess.raw, c.to_send_alloc)
             }
             clear(&c.to_send)
-            sync.unlock(&c.lock)
+            sync.unlock(&c.to_send_lock)
 
             err = rb_send(rb)
         }
-        
 
         if .Pinging in sync.atomic_load(&s.flags) {
             if .Pinged not_in sync.atomic_load(&c.flags) {
@@ -849,30 +715,75 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
 
             for ch in c.chans {
                 sync.lock(&s.channs_lock)
-                v, ok := s.channels[ch]
+                chan, ok := s.channels[ch]
                 sync.unlock(&s.channs_lock)
 
                 if ok {
-                    sync.guard(&v.lock)
-                    append(&v.to_remove, c)
+                    sync.guard(&chan.lock)
+                    append(&chan.to_remove, c)
 
+                    sync.guard(&chan.to_send_lock)
                     to_send := Message {
-                        sender = {full=strings.clone(c.full, v.to_send_alloc)},
+                        sender = {full=strings.clone(c.full, chan.to_send_alloc)},
                         cmd = "QUIT",
                         tail = ":QUIT: Sever has closed the connection.",
                     }
-                    append(&v.to_send, to_send)
+                    append(&chan.to_send, to_send)
                 }
             }
+            clear(&c.chans)
+
+            break main_loop
         }
     }
 
+    log.debug("Closing client:", c.user)
+    sync.atomic_or(&c.thread_flags, {.Closeing})
+    defer sync.atomic_nand(&c.thread_flags, {.Closeing})
+
+    sync.guard(&c.lock)
+    sync.guard(&c.to_send_lock)
+
+    net.close(c.sock)
+    c.sock = 0
+
+    context.allocator = s.base_alloc
+    delete_key(&s.nicks, c.nick)
+    assert(c.nick not_in s.nicks)
+
+    delete(c.full)
+    delete(c.real)
+    delete(c.nick)
+    delete(c.chans)
+    delete(c.ping_token)
+
+    for mess in c.mess_cache {
+        destroy_message(mess)
+    }
+    delete(c.mess_cache)
+
+    for mess in c.to_send {
+        destroy_message(mess)
+    }
+    delete(c.to_send)
+
+    sync.guard(&s.client_lock)
+    delete_key(&s.clients, c.user)
+    assert(c.user not_in s.clients)
+
+    log.debug("User \"", c.user, "\" has been removed from the server", sep="")
+    delete(c.user) // k == c.user
     log.infof("Client thread for \"%v\" has ended.", c.full)
+
+    mem.zero(c, size_of(Client))
+    free(c)
     
 }
 
 
 channel_thread :: proc(s: ^Server, c: ^Channel, _start_barrier: ^sync.Barrier) {
+    assert(context.temp_allocator.procedure == runtime.default_temp_allocator_proc)
+
     start_barrier := _start_barrier
     sync.barrier_wait(start_barrier)
     start_barrier = nil
@@ -880,7 +791,7 @@ channel_thread :: proc(s: ^Server, c: ^Channel, _start_barrier: ^sync.Barrier) {
     context.allocator = s.base_alloc
     context.logger = s.base_logger
 
-    c.to_send_alloc = context.allocator // TODO: Move to another allocator???
+    c.to_send_alloc = s.base_alloc
 
     defer {
         sync.atomic_or(&c.flags, {.Close})
@@ -892,7 +803,7 @@ channel_thread :: proc(s: ^Server, c: ^Channel, _start_barrier: ^sync.Barrier) {
     for !sync.atomic_load(&s.close_channel_threads) {
         defer free_all(context.temp_allocator)
 
-        time.accurate_sleep(time.Millisecond * 50)
+        time.accurate_sleep(CHANNEL_THREAD_TIMEOUT)
 
         sync.lock(&c.lock)
 
@@ -905,26 +816,32 @@ channel_thread :: proc(s: ^Server, c: ^Channel, _start_barrier: ^sync.Barrier) {
         clear(&c.to_remove)
 
         #reverse for user, pos in c.users { 
-            sync.guard(&user.lock)
-
             sync.lock(&s.client_lock)
-            if user.user not_in s.clients {
+            if user.user not_in s.clients || .Quit in sync.atomic_load(&user.flags) {
                 unordered_remove(&c.users, pos)
                 sync.unlock(&s.client_lock)
                 continue
             }
             sync.unlock(&s.client_lock)
 
-            for mess in c.to_send do if mess.sender.full != user.full {
-                m := mess
-                if m.raw == "" {
-                    m.raw = format_message(mess, user.to_send_alloc)
-                } else {
-                    m.raw = strings.clone(mess.raw, user.to_send_alloc)
+            if sync.try_lock(&user.lock) {
+                sync.guard(&user.to_send_lock)
+                for mess in c.to_send {
+                    if mess.sender.full == user.full {
+                        continue
+                    }
+
+                    m := mess
+                    if m.raw == "" {
+                        m.raw = format_message(mess, user.to_send_alloc)
+                    } else {
+                        m.raw = strings.clone(mess.raw, user.to_send_alloc)
+                    }
+                    
+                    append(&user.to_send, m)
+                    delete(mess.raw, c.to_send_alloc)
                 }
-                
-                append(&user.to_send, m)
-                delete(mess.raw, c.to_send_alloc)
+                sync.unlock(&user.lock)
             }
             
         }
@@ -978,89 +895,6 @@ capability_negotiation :: proc(s: ^Server, c: ^Client, in_mess: Message) -> Erro
 }
 
 
-reset_net_buf :: proc(n: ^Net_Buffer, zero := false) {
-    n.peek = 0
-    n.read = 0
-    n.pos  = 0
-
-    if zero {
-        mem.zero_explicit(&n.buf, len(n.buf))
-    }
-}
-
-
-pop_net_buf :: proc(n: ^Net_Buffer, read_type: enum{None, First, Last, All} = .None) -> (err: Error) {
-    if n.pos == 0 {
-        n.read = 0
-        n.peek = 0
-        return
-    }
-
-    #partial switch read_type {
-    case .All:
-        i := bytes.last_index(n.buf[:n.pos], MESS_END)
-        if i == -1 {
-            return IRC_Errors.No_End_Of_Message
-        }
-        n.read = i + len(MESS_END)
-    
-    case .Last:
-        i := bytes.last_index(n.buf[:n.pos], MESS_END)
-        if i == -1 {
-            return IRC_Errors.No_End_Of_Message
-        }
-
-        i = bytes.last_index(n.buf[:i], MESS_END)
-        if i == -1 {
-            i = 0
-        }
-
-        n.pos = i
-
-    case .First:
-        if i := bytes.index(n.buf[n.read:n.pos], MESS_END); i != -1 {
-            if MESSAGE_SIZE < i { 
-                return IRC_Errors.User_Mess_To_Big
-            }
-            n.read += i + len(MESS_END)
-            
-        } else {
-            return IRC_Errors.No_End_Of_Message
-        }
-    } 
-
-    if n.read != 0 {
-        n.pos = copy(n.buf[:], n.buf[n.read:n.pos])
-        n.read = 0
-        n.peek = 0
-    }
-
-    return
-}
-
-
-// Only reads what's currently in the Net_Buffer. Doesn't reach out for more data.
-peek_message :: proc(s: ^Server, c: ^Client, clone_mess := false) -> (mess: Message, err: Error) {
-    mess, err = parse_message(&c.net_buf, context.temp_allocator, clone_mess, true)
-
-    if v, ok := err.(IRC_Errors); ok && v == .User_Mess_To_Big {
-        send_cmd(c.sock, s.name, .ERR_INPUTTOOLONG, c.user, " :Input line was too long") or_return
-    }
-
-    return
-}
-
-
-get_message :: proc(s: ^Server, c: ^Client, clone_mess := false) -> (mess: Message, err: Error) {
-    if pop_net_buf(&c.net_buf) != nil || c.net_buf.pos == 0 {
-        recv_data(&c.net_buf, c.sock) or_return
-    }
-    mess, err = parse_message(&c.net_buf, context.temp_allocator, clone_mess)
-    return
-}
-
-
-
 send_bytes :: proc(sock: net.TCP_Socket, buf: []u8) -> Error {
     switch {
     case len(buf) <= 0:
@@ -1071,7 +905,11 @@ send_bytes :: proc(sock: net.TCP_Socket, buf: []u8) -> Error {
         return IRC_Errors.No_End_Of_Message
     }
 
-    n := net.send_tcp(sock, buf) or_return
+    n, err := net.send_tcp(sock, buf)
+    if err != nil {
+        return net.Network_Error(err)
+    }
+
     log.assertf(n == len(buf), "%v != %v;; mess = %q", n, len(buf), string(buf))
     return nil
 }
@@ -1139,10 +977,10 @@ send_cmd :: proc(sock: net.TCP_Socket, source: string, cmd: com.RC, params: ..st
     }
 
     if cmd != .None {
-        s := strconv.append_uint(buf[i:], u64(cmd), 10)
+        s := strconv.write_uint(buf[i:], u64(cmd), 10)
         i += len(s)
     } else {
-        s := strconv.append_uint(buf[i:], u64(com.RC.RPL_NONE), 10)
+        s := strconv.write_uint(buf[i:], u64(com.RC.RPL_NONE), 10)
         i += len(s)
     }
 
@@ -1169,8 +1007,14 @@ rb_send :: proc(rb: ^Response_Buffer) -> Error {
     if len(rb.data) <= 0 {
         return nil
     }
+    if string(rb.data[len(rb.data)-2:]) != MESS_END_STR {
+        return IRC_Errors.No_End_Of_Message
+    }
 
-    n := net.send_tcp(rb.sock, rb.data[:]) or_return
+    n, err := net.send_tcp(rb.sock, rb.data[:])
+    if err != nil {
+        return net.Network_Error(err)
+    }
 
     log.assertf(n == len(rb.data), "%v != %v: mess = %q", n, len(rb.data), string(rb.data[:]))
     clear(&rb.data)
@@ -1196,10 +1040,10 @@ rb_cmd :: proc(rb: ^Response_Buffer, source: string, cmd: com.RC, params: ..stri
     }
 
     if cmd != .None {
-        s := strconv.append_uint(buf[i:], u64(cmd), 10)
+        s := strconv.write_uint(buf[i:], u64(cmd), 10)
         i += len(s)
     } else {
-        s := strconv.append_uint(buf[i:], u64(com.RC.RPL_NONE), 10)
+        s := strconv.write_uint(buf[i:], u64(com.RC.RPL_NONE), 10)
         i += len(s)
     }
 
@@ -1313,31 +1157,82 @@ recv_data :: proc(n_buf: ^Net_Buffer, sock: net.TCP_Socket) -> (err: net.Network
 }
 
 
-index_message :: proc(n: ^Net_Buffer, consume := true, peek := false) -> (pos: int, err: Error) {
-    if peek {
-        if n.peek < n.read {
-            n.peek = n.read
+
+reset_net_buf :: proc(n: ^Net_Buffer, zero := false) {
+    n.read = 0
+    n.pos  = 0
+
+    if zero {
+        mem.zero_explicit(&n.buf, len(n.buf))
+    }
+}
+
+
+pop_net_buf :: proc(n: ^Net_Buffer, read_type: enum{None, First, Last, All} = .None) -> (err: Error) {
+    if n.pos == 0 {
+        n.read = 0
+        return
+    }
+
+    #partial switch read_type {
+    case .All:
+        i := bytes.last_index(n.buf[:n.pos], MESS_END)
+        if i == -1 {
+            return IRC_Errors.No_End_Of_Message
+        }
+        n.read = i + len(MESS_END)
+    
+    case .Last:
+        i := bytes.last_index(n.buf[:n.pos], MESS_END)
+        if i == -1 {
+            return IRC_Errors.No_End_Of_Message
         }
 
-        if i := bytes.index(n.buf[n.peek:n.pos], MESS_END); i != -1 {
-            if MESSAGE_SIZE < i {
-                return 0, IRC_Errors.User_Mess_To_Big
+        i = bytes.last_index(n.buf[:i], MESS_END)
+        if i == -1 {
+            i = 0
+        }
+
+        n.pos = i
+
+    case .First:
+        if i := bytes.index(n.buf[n.read:n.pos], MESS_END); i != -1 {
+            if MESSAGE_SIZE < i { 
+                return IRC_Errors.User_Mess_To_Big
             }
-    
-            pos = i
-            if consume { n.peek = i + len(MESS_END) } 
+            n.read += i + len(MESS_END)
             
         } else {
-            return 0, IRC_Errors.No_End_Of_Message
+            return IRC_Errors.No_End_Of_Message
         }
+    } 
 
-    } else if i := bytes.index(n.buf[n.read:n.pos], MESS_END); i != -1 {
+    if n.read != 0 {
+        n.pos = copy(n.buf[:], n.buf[n.read:n.pos])
+        n.read = 0
+    }
+
+    return
+}
+
+
+get_message :: proc(s: ^Server, c: ^Client, clone_mess := false) -> (mess: Message, err: Error) {
+    if pop_net_buf(&c.net_buf) != nil || c.net_buf.pos == 0 {
+        recv_data(&c.net_buf, c.sock) or_return
+    }
+    mess, err = parse_message(&c.net_buf, context.temp_allocator, clone_mess)
+    return
+}
+
+
+index_message :: proc(n: ^Net_Buffer, consume := true) -> (pos: int, err: Error) {
+    if i := bytes.index(n.buf[n.read:n.pos], MESS_END); i != -1 {
         if MESSAGE_SIZE < i {
             return 0, IRC_Errors.User_Mess_To_Big
         }
 
         pos = i
-        if consume { n.peek = i + len(MESS_END) } 
+        if consume { n.read = i + len(MESS_END) } 
         
     } else {
         return 0, IRC_Errors.No_End_Of_Message
@@ -1350,8 +1245,8 @@ index_message :: proc(n: ^Net_Buffer, consume := true, peek := false) -> (pos: i
 parse_message :: proc{parse_message_str, parse_message_net_buf}
 
 
-parse_message_net_buf :: proc(n: ^Net_Buffer, alloc: runtime.Allocator, clone := false, peek := false) -> (mess: Message, err: Error) {
-    idx := index_message(n, peek = peek) or_return
+parse_message_net_buf :: proc(n: ^Net_Buffer, alloc: runtime.Allocator, clone := false) -> (mess: Message, err: Error) {
+    idx := index_message(n) or_return
     return parse_message_str(string(n.buf[:idx]), alloc, clone)
 }
 
@@ -1371,9 +1266,9 @@ parse_message_str :: proc(str: string, alloc: runtime.Allocator, clone := false)
     }
 
     if s[0] == ' ' {
-        for i: int; i < len(s); i += 1 {
-            if s[i] != ' ' {
-                s = s[i:]
+        for n: int; n < len(s); n += 1 {
+            if s[n] != ' ' {
+                s = s[n:]
                 break
             }
         }
