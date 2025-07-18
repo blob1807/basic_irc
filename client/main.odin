@@ -1,6 +1,5 @@
 package basic_irc_client
 
-import "base:runtime"
 import ir "base:intrinsics"
 
 import "core:fmt"
@@ -8,26 +7,19 @@ import "core:net"
 import "core:os"
 import "core:thread"
 import "core:sync"
-import "core:time"
-import "core:bytes"
 import "core:strings"
-import "core:strconv"
-import "core:reflect"
 import "core:log"
-import "core:io"
-import "core:unicode/utf8"
-import sa "core:container/small_array"
 
 
 
 HELP :: `
 ================================================================================================
 
-    A basic multi-threaded IRC client with simple formating.
+    A basic IRC client with simple formating.
     Only 1 channel & server can be connected to at once.
 
     Usage:
-        Any non commands will be sent as a noraml message
+        Any non-commands will be sent as a noraml message.
 
         Commands:
             prefix: !
@@ -52,105 +44,33 @@ HELP :: `
 ================================================================================================
 `
 
-client_runner :: proc() {
-    c: Client
-    buf: [64]byte
+client_runner :: proc(c: ^Client) {
 
-    /*
-    fmt.println(" Required:")
-    fmt.print  ("    Username: ")
-    n, read_err := os.read(os.stdin, buf[:])
-    if read_err != nil {
-        fmt.eprintln("ERROR: Failed to read input:", read_err)
-        os.exit(-1)
-    }
-    if n <= 2 {
-        fmt.eprintln("ERROR: No Username was given")
-        os.exit(-1)
-    }
-    c.user = strings.clone(strings.trim_right_space(string(buf[:n])))
-
-
-    fmt.print  ("  Server URL: ")
-    n, read_err = os.read(os.stdin, buf[:])
-    if read_err != nil {
-        fmt.eprintln("ERROR: Failed to read input:", read_err)
-        os.exit(-1)
-    }
-    if n <= 2 {
-        fmt.eprintln("ERROR: No Username was given")
-        os.exit(-1)
-    }
-    c.server.url = strings.clone(strings.trim_right_space(string(buf[:n])))
-
-
-    fmt.println(" Optional:")
-    fmt.print  ("    Nickname: ") 
-    n, read_err = os.read(os.stdin, buf[:])
-    if read_err != nil {
-        fmt.eprintln("ERROR: Failed to read input:", read_err)
-        os.exit(-1)
-    }
-    if n > 2 {
-        c.nick = strings.clone(strings.trim_right_space(string(buf[:n])))
-    } else {
-        c.nick = strings.clone(c.user)
-    }
-
-
-    fmt.print  ("     Channel: ") 
-    n, read_err = os.read(os.stdin, buf[:])
-    if read_err != nil {
-        fmt.eprintln("ERROR: Failed to read input:", read_err)
-        os.exit(-1)
-    }
-    if n > 2 {
-        c.chan = strings.clone(strings.trim_right_space(string(buf[:n])))
-    }
-
-
-    fmt.print  ("    Password: ") 
-    n, read_err = os.read(os.stdin, buf[:])
-    if read_err != nil {
-        fmt.eprintln("ERROR: Failed to read input:", read_err)
-        os.exit(-1)
-    }
-    if n > 2 {
-        c.pass = strings.clone(strings.trim_right_space(string(buf[:n])))
-    }
-    */
-
-    c.user = "odin"
-    c.nick = "odin"
-
-    IP :: "127.0.0.1:69"
-    //IP :: "127.0.0.1:6697"
-
-    server_err := join_server(&c, IP)
+    server_err := join_server(c, c.server.url)
     if server_err != nil {
-        fmt.eprintfln("ERROR: Failed to connect to server %w  %v", IP, server_err)
+        fmt.eprintfln("ERROR: Failed to connect to server %w  %v", c.server.url, server_err)
         os.exit(-1)
     }
 
-    recv_thr := thread.create_and_start_with_poly_data(&c, recv_thread)
+    recv_thr := thread.create_and_start_with_poly_data(c, recv_thread)
 
     fmt.println(HELP) 
-    join_chan(&c, "#main")
+    join_chan(c, "#main")
     enable_raw_input()
 
     loop: for {
         buf: [MAX_MESSAGE_SIZE]u8
         
-        str, read_err := read_input(&c, buf[:])
+        str, read_err := read_input(c, buf[:])
         if read_err != nil {
-            eprintln(&c, "ERROR: Failed to read input:", read_err)
+            eprintln(c, "ERROR: Failed to read input:", read_err)
             os.exit(-1)
         }
 
         str = strings.trim_right_space(str)
 
         if len(str) == 0 {
-            eprintln(&c, "ERROR: No Message was given.")
+            eprintln(c, "ERROR: No Message was given.")
             continue
         }
 
@@ -160,7 +80,7 @@ client_runner :: proc() {
             sync.unlock(&c.mutex)
 
             if len(str) == 1 {
-                eprintln(&c, "ERROR: No Command was given.")
+                eprintln(c, "ERROR: No Command was given.")
                 continue
             }
 
@@ -171,7 +91,7 @@ client_runner :: proc() {
 
             switch str[1:i] {
             case "help", "h":
-                println(&c, HELP)
+                println(c, HELP)
 
             case "quit", "q", "exit", "e":
                 mess: string
@@ -180,7 +100,7 @@ client_runner :: proc() {
                 }
 
                 log.debug("Quiting")
-                leave_server(&c, mess)
+                leave_server(c, mess)
 
                 sync.atomic_store(&c.close_thread, true)
                 sync.barrier_wait(&c.close_barrier)
@@ -194,9 +114,9 @@ client_runner :: proc() {
                 }
 
                 mess, type: string
-                str := str[i+1:]
+                str = str[i+1:]
 
-                i := strings.index_byte(str, ' ')
+                i = strings.index_byte(str, ' ')
                 if i == -1 {
                     type = str
                 
@@ -207,10 +127,10 @@ client_runner :: proc() {
 
                 switch type {
                 case "server", "s":
-                    leave_server(&c, mess)
+                    leave_server(c, mess)
 
                 case "channel", "c":
-                    leave_chan(&c, mess)
+                    leave_chan(c, mess)
                 }
 
             case "join", "j":
@@ -220,9 +140,9 @@ client_runner :: proc() {
                 }
 
                 type, dst, mess: string
-                str := str[i+1:]
+                str = str[i+1:]
 
-                i := strings.index_byte(str, ' ')
+                i = strings.index_byte(str, ' ')
                 if i == -1 {
                     fmt.eprintln("No paramator was given. both <server (s) or channel (c)> & <url / name> need to be given.")
                     continue
@@ -231,7 +151,7 @@ client_runner :: proc() {
                     type = str[:i]
                     str = str[i+1:]
 
-                    i := strings.index_byte(str, ' ')
+                    i = strings.index_byte(str, ' ')
                     if i == -1 {
                         dst = str
 
@@ -243,36 +163,33 @@ client_runner :: proc() {
 
                 switch type {
                 case "server", "s":
-                    leave_server(&c, mess)
+                    leave_server(c, mess)
 
                     sync.atomic_store(&c.pause_thread, true)
                     sync.barrier_wait(&c.pause_barrier)
 
-                    join_server(&c, dst)
+                    join_server(c, dst)
                     sync.atomic_store(&c.pause_thread, false)
 
                 case "channel", "c":
-                    leave_chan(&c, mess)
-                    join_chan(&c, dst)
+                    leave_chan(c, mess)
+                    join_chan(c, dst)
                 }
 
             case "cmd", "c":
-                send_message(&c, str[i+1:])
+                send_message(c, str[i+1:])
 
             case:
                 if str[1] == '!' {
-                    send_message(&c, str[1:])
+                    send_message(c, str[1:])
                 } else {
-                    eprintln(&c, "ERROR: Unkown Command:", str[:i])
+                    eprintln(c, "ERROR: Unkown Command:", str[:i])
                 }
             }
 
         } else {
-            sync.lock(&c.mutex)
-            println(&c, " mess:", str)
-            sync.unlock(&c.mutex)
-
-            send_message(&c, str)
+            println(c, " mess:", str)
+            send_message(c, str)
         }
     }
 
@@ -282,9 +199,105 @@ client_runner :: proc() {
     return
 }
 
+get_user_settings :: proc(c: ^Client) -> bool {
+    buf: [64]byte
+    str: string
+
+    fmt.println(" Required:")
+    fmt.print  ("    Username: ")
+    n, read_err := os.read(os.stdin, buf[:])
+    if read_err != nil {
+        fmt.eprintln("ERROR: Failed to read input:", read_err)
+        return false
+    }
+
+    str = strings.trim_space(string(buf[:n]))
+    if len(str) == 0 {
+        fmt.eprintln("ERROR: No Username was given")
+        return false
+    }
+    c.user = strings.clone(str)
+
+
+    fmt.print("  Server URL: ")
+    n, read_err = os.read(os.stdin, buf[:])
+    if read_err != nil {
+        fmt.eprintln("ERROR: Failed to read input:", read_err)
+        return false
+    }
+
+    str = strings.trim_space(string(buf[:n]))
+    if len(str) == 0 {
+        fmt.eprintln("ERROR: No Username was given")
+        return false
+    }
+    c.server.url = strings.clone(str)
+
+
+    fmt.println(" Optional:")
+    fmt.print  ("    Nickname: ") 
+    n, read_err = os.read(os.stdin, buf[:])
+    if read_err != nil {
+        fmt.eprintln("ERROR: Failed to read input:", read_err)
+        return false
+    }
+
+    str = strings.trim_space(string(buf[:n]))
+    if len(str) != 0 {
+        c.nick = strings.clone(str)
+    } else {
+        c.nick = strings.clone(c.user)
+    }
+
+
+    fmt.print("     Channel: ") 
+    n, read_err = os.read(os.stdin, buf[:])
+    if read_err != nil {
+        fmt.eprintln("ERROR: Failed to read input:", read_err)
+        return false
+    }
+    
+    str = strings.trim_space(string(buf[:n]))
+    if len(str) != 0 {
+        c.chan = strings.clone(str)
+    }
+
+
+    fmt.print("    Password: ") 
+    n, read_err = os.read(os.stdin, buf[:])
+    if read_err != nil {
+        fmt.eprintln("ERROR: Failed to read input:", read_err)
+        return false
+    }
+
+    str = strings.trim_space(string(buf[:n]))
+    if len(str) != 0 {
+        c.pass = strings.clone(str)
+    }
+
+    return true
+}
+
 
 main :: proc() { 
     context.logger = log.create_console_logger()
-    client_runner()
+    c: Client
+
+    if !get_user_settings(&c) {
+        os.exit(-1)
+    }
+    
+    if true {
+        fmt.println(c)
+        return
+    }
+
+    // c.user = "odin"
+    // c.nick = "odin"
+
+    // c.server.url = "127.0.0.1:69"
+    // c.server.url = "127.0.0.1:6697"
+
+    client_runner(&c)
 }
 

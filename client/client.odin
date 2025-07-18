@@ -10,7 +10,6 @@ import "core:fmt"
 import "core:sync"
 import "core:time"
 import "core:bytes"
-import "core:thread"
 import "core:strings"
 import "core:strconv"
 import "core:reflect"
@@ -20,13 +19,14 @@ import sa "core:container/small_array"
 import "../common"
 
 
+// Zeros the given Client
 init_client :: proc(c: ^Client, user: string, nick := "", real := "", pass := "", alloc := context.allocator) {
     runtime.mem_zero(c, size_of(Client))
 
     c.user = user
     c.nick = nick != "" ? nick : user
     c.real = real != "" ? real : user
-    c.pass = pass != "" ? pass : user
+    c.pass = pass
 
     c.parsed = make([dynamic]Message, 0, 5, alloc)
 
@@ -109,10 +109,8 @@ send_command :: proc(sock: net.TCP_Socket, cmd: ..string) -> (err: net.Network_E
         i += copy(buf[i:], p)
     }
 
-    _cmd := transmute([]byte)cmd
-    for n: int; n < i; /**/ {
-        n += net.send_tcp(sock, buf[n:i]) or_return
-    }
+    n := net.send_tcp(sock, buf[:i]) or_return
+    assert(n == i)
 
     return
 }
@@ -149,7 +147,11 @@ join_server :: proc(c: ^Client, dst: string, alloc := context.allocator) -> (err
     context.allocator = alloc
 
     sock := net.dial_tcp(dst) or_return
-    net.set_option(sock, .Receive_Timeout, NET_TIMEOUT) or_return
+    n_err := net.set_option(sock, .Receive_Timeout, NET_TIMEOUT)
+    if n_err != nil {
+        return net.Network_Error(n_err)
+    }
+
     c.sock = sock
     c.server.url = dst
 
@@ -167,7 +169,7 @@ join_server :: proc(c: ^Client, dst: string, alloc := context.allocator) -> (err
     log.debug("Sent Nick", c.nick)
     mess, err = get_messaage(c)
     if v, o := err.(net.Network_Error); o {
-        if vv, oo := v.(net.TCP_Recv_Error); o && vv != .Timeout {
+        if vv, oo := v.(net.TCP_Recv_Error); oo && vv != .Timeout {
             return
         }
     } else if err != nil {
@@ -175,7 +177,7 @@ join_server :: proc(c: ^Client, dst: string, alloc := context.allocator) -> (err
     }
 
     #partial switch mess.code {
-    case .ERR_INPUTTOOLONG, .ERR_NOTREGISTERED: fallthrough
+    case .ERR_INPUTTOOLONG, .ERR_NOTREGISTERED, .ERR_UNKNOWNERROR: fallthrough
     case .ERR_NONICKNAMEGIVEN, .ERR_ERRONEUSNICKNAME, .ERR_NICKNAMEINUSE, .ERR_NICKCOLLISION:
         print_mess(c, mess)
         pop_message(c, len(mess.raw))
@@ -187,7 +189,7 @@ join_server :: proc(c: ^Client, dst: string, alloc := context.allocator) -> (err
     log.debug("Sent User", c.user)
     mess, err = get_messaage(c)
     if v, o := err.(net.Network_Error); o {
-        if vv, oo := v.(net.TCP_Recv_Error); o && vv != .Timeout {
+        if vv, oo := v.(net.TCP_Recv_Error); oo && vv != .Timeout {
             return
         }
     } else if err != nil {
@@ -195,8 +197,8 @@ join_server :: proc(c: ^Client, dst: string, alloc := context.allocator) -> (err
     }
     
     #partial switch mess.code {
-    case .ERR_INPUTTOOLONG, .ERR_NOTREGISTERED: fallthrough
-    case .ERR_NEEDMOREPARAMS, .ERR_ALREADYREGISTERED: 
+    case .ERR_INPUTTOOLONG, .ERR_NOTREGISTERED, .ERR_UNKNOWNERROR: fallthrough
+    case .ERR_NEEDMOREPARAMS, .ERR_ALREADYREGISTERED, .ERR_INVALIDUSERNAME: 
         print_mess(c, mess)
         pop_message(c, len(mess.raw))
         destroy_message(mess)
@@ -217,10 +219,10 @@ join_server :: proc(c: ^Client, dst: string, alloc := context.allocator) -> (err
         }
 
         for c.net.pos > 0 {
-            mess, m_err := parse_message(c, true, true)
+            mess, err = parse_message(c, true, true)
 
-            if m_err != nil {
-                if _, ok := m_err.(IRC_Errors); !ok {
+            if err != nil {
+                if _, ok := err.(IRC_Errors); !ok {
                     destroy_message(mess)
                 }
                 
@@ -405,7 +407,17 @@ format_mess :: proc(mess: Message, buf: []u8) -> (res: string) {
 
     } else if common.is_valid_code(mess.code) { 
         strings.write_byte(&sb, ' ')
-        strings.write_string(&sb, reflect.enum_string(mess.code))
+        str := reflect.enum_string(mess.code)
+        strings.write_string(&sb, str)
+
+        if n := 17 - len(str); n > 0 {
+            size := len(sb.buf)
+            resize(&sb.buf, size + n)
+            for i in size..<size+n {
+                sb.buf[i] = ' '
+            }
+        }
+
         strings.write_byte(&sb, ':')
 
     } else {
@@ -489,8 +501,7 @@ read_input :: proc(c: ^Client, buf: []byte) -> (res: string, err: Error) {
             }
 
         case '\n', '\r':
-            // because windows sucks ass we can't read \r\n is full, only \r.
-            // this might actully be an issue with os.read skipping a character's bytes
+            // there's an issue with os.read skipping a character's bytes
             // if they're not read all at once
             // see: https://github.com/odin-lang/Odin/issues/4999#issuecomment-2779194161
             
