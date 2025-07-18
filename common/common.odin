@@ -1,8 +1,6 @@
 package basic_irc_common
 
-import "core:strings"
 import "core:unicode/utf8"
-import "core:unicode/utf8/utf8string"
 
 
 is_valid_nick :: proc(nick: string) -> bool {

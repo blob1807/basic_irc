@@ -1,11 +1,11 @@
 package basic_irc_server
 
-import "core:log"
-import "core:mem"
-import "core:fmt"
-import "base:runtime"
+@(require) import "core:log"
+@(require) import "core:mem"
+@(require) import "core:fmt"
+@(require) import "base:runtime"
 
-import com "../common"
+@(require) import com "../common"
 
 main :: proc() { 
     context.logger = log.create_console_logger()

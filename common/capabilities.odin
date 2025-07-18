@@ -124,7 +124,7 @@ Capability_to_String_Array := [Capability]string {
     .Setname                = "setname",
     .Standard_Replies       = "standard-replies",
     .TLS                    = "tls",
-    .Userhost_in_Names      = "userhost-in-names"
+    .Userhost_in_Names      = "userhost-in-names",
 }
 
 
@@ -184,6 +184,7 @@ caps_to_set :: proc(cs: []Capability) -> (res: Capabilities_Set) {
 }
 
 
+// Invalid Capabilities are ignored
 caps_str_to_set :: proc(cs: []string) -> (res: Capabilities_Set) {
     for str in cs {
         c := string_to_cap(str) or_continue
@@ -224,6 +225,12 @@ set_to_caps_str :: proc(set: Capabilities_Set, alloc: runtime.Allocator, poison 
 
     shrink(&buf)
     return buf[:], nil
+}
+
+
+@(fini)
+cap_cleanup :: proc() {
+    delete(String_to_Capability_Map)
 }
 
 

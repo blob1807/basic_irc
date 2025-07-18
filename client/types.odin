@@ -8,7 +8,6 @@ import "core:os"
 import "core:net"
 import "core:time"
 import "core:sync"
-import "core:thread"
 import sa "core:container/small_array"
 
 import "../common"
@@ -116,12 +115,12 @@ Server :: struct {
 }
 
 Sender_Type :: enum {
-    None, Invalid, Server, Self, User, Sys, Sys_Err
+    None, Invalid, Server, Self, User, Sys, Sys_Err,
 }
 
 Sender :: struct {
     name: string,
-    type: Sender_Type
+    type: Sender_Type,
 }
 
 Message :: struct {

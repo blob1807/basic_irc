@@ -1,4 +1,4 @@
-#+build !windows
+#+build linux, freebsd, openbsd, darwin
 package basic_irc_client
 
 import "base:runtime"
