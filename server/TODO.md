@@ -1,34 +1,34 @@
 
 - [X] Rework all cmd_* to take a buffer
-    - [ ] Work out where it's worth to send the buffer
+    - [X] Work out where it's worth to send the buffer
 
-- [ ] Move to an id based system:
+- [-] Move to an id based system:
     - Is UUID good enough?
-    - [ ] Sender
+    - [-] Sender
     - Helpers:
-        - [ ] user -> id
-        - [ ] nick -> id
-        - [ ] id   -> Client
+        - [-] user -> id
+        - [-] nick -> id
+        - [-] id   -> Client
     - Channel:
-        - [ ] `admin`
-        - [ ] `users`
+        - [-] `admin`
+        - [-] `users`
     - Server:
-        - [ ] `nicks`
-        - [ ] `clients`
-        - [ ] `admin`
+        - [-] `nicks`
+        - [-] `clients`
+        - [-] `admin`
 
-- [ ] More threading ya:
-    - [ ] Atomic wrapper type
-    - [ ] Atomic wrapper procs
+- [X] More threading ya:
+    - [-] Atomic wrapper type
+    - [-] Atomic wrapper procs
     - Server:
     - Client:
-        - [ ] Thread proc
-        - [ ] `to_send`   -> sync/chan
-        - [ ] Add messages to cache when can't send
+        - [X] Thread proc
+        - [-] `to_send`   -> sync/chan
+        - [X] Add messages to cache when can't send
     - Channel: 
-        - [ ] Thread proc
-        - [ ] `to_remove` -> sync/chan
-        - [ ] `to_send`   -> sync/chan
+        - [X] Thread proc
+        - [-] `to_remove` -> sync/chan
+        - [-] `to_send`   -> sync/chan
 
 - Ensure conplince with
     - [ ] https://modern.ircdocs.horse/#compatibility-with-incorrect-software
@@ -36,13 +36,21 @@
 - [X] Remove virtual arenas from threads. Assume default temp alloc is used.
 
 - [-] Should `Message.cmd` be an enum???
-    - I remember thinking it wouldn't be worth it during parser because I'd
-      still need to save the string on Unknown command.
-      Plus I'd still need check all values or use a map & 
-      I'm only checking the cmds once anyways.
+    I remember thinking it wouldn't be worth it during parser because I'd
+    still need to save the string on Unknown command.
+    Plus I'd still need check all values or use a map & 
+    I'm only checking the cmds once anyways.
 
-- [ ] Implement Capability Negotiation
+- [X] Implement Capability Negotiation
 
 - [ ] Add rate limiting to Clients
 
 - [ ] Add Documentation :)
+
+- [ ] Messages should only be allocated to the destination allocator when it can be sent.  
+    Allows for the allocator to be an arena. 
+    Aplicable to `Channel/Client.to_send` & `Client.mess_cache`
+
+- [ ] `Server.client/channel/nick_lock` could probably be moved to a `rwmutex`
+
+- [ ] Have cleint threads to cleanup after themselfs
