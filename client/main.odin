@@ -286,11 +286,6 @@ main :: proc() {
     if !get_user_settings(&c) {
         os.exit(-1)
     }
-    
-    if true {
-        fmt.println(c)
-        return
-    }
 
     // c.user = "odin"
     // c.nick = "odin"
