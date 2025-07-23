@@ -9,7 +9,7 @@ package basic_irc_server
 
 main :: proc() { 
     context.logger = log.create_console_logger()
-    defer log.destroy_console_logger(context.logger, runtime.default_allocator())
+    defer log.destroy_console_logger(context.logger)
     
     /*
         track: mem.Tracking_Allocator

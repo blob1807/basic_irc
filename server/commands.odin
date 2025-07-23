@@ -715,7 +715,7 @@ cmd_cap :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message, poi
         return
     }
 
-    // TODO: Poison the cap list to ensure clients are properaly checking it
+    // Poison the cap list to ensure clients are properaly checking it
     // https://ergo.chat/nope
 
     switch to_upper(mess.params[0]) {

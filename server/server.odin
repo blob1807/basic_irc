@@ -74,14 +74,22 @@ init_server :: proc(
 
 
 server_cleanup :: proc(s: ^Server, free_i_support := true) {
-    for _, &c in s.clients {
+    for _, c in s.clients {
+        if c == nil {
+            continue
+        }
+
         destroy_client(c)
         free(c)
     }
     delete(s.clients)
     delete(s.nicks)
 
-    for _, &c in s.channels {
+    for _, c in s.channels {
+        if c == nil {
+            continue
+        }
+
         destroy_chan(c)
         free(c)
     }
@@ -319,6 +327,9 @@ server_runner :: proc(s: ^Server) -> (err: Error) {
 }
 
 
+/*
+Handles the accepting of new client connections & opening of client threads.
+*/
 open_new_clients_thread :: proc(s: ^Server) {
     assert(context.temp_allocator.procedure == runtime.default_temp_allocator_proc)
 
@@ -340,49 +351,13 @@ open_new_clients_thread :: proc(s: ^Server) {
 
         log.debug("New connection", source)
 
-        rb := &Response_Buffer {
-            sock = c_sock,
-            data = make([dynamic]u8, context.temp_allocator),
-        }
-
-        c := Client{sock=c_sock, ep=source}
-        err := onboard_new_client(s, &c, rb)
-        rb_err := rb_send(rb)
-
-        if err != nil || rb_err != nil {
-            log.errorf("Onboard Err: %v;  RB Err: %v;  Client: %v", err, rb_err, c)
-            if c.quit_mess != "" {
-                send_cmd_str(c.sock, s.name, "QUIT", c.user, c.quit_mess)
-            } else {
-                send_cmd_str(c.sock, s.name, "QUIT", c.user, ":Server has closed your connection.")
-            }
-            
-            net.close(c.sock)
-            destroy_client(&c)
-            continue
-        }
-
-        c.full = strings.concatenate({c.user, "!u@", s.name})
-        c.flags += {.Registered}
-
-        c_ptr := new_clone(c)
-
-        sync.guard(&s.client_lock)
-        sync.guard(&s.nick_lock)
-        s.clients[c.user] = c_ptr
-        s.nicks[c.nick] = c.user
-
-        if len(s.clients) > s.stats.max_num_clients {
-            s.stats.max_num_clients = len(s.clients)
-        }
+        c := new_clone(Client{sock=c_sock, ep=source})
         
         start_barrier: sync.Barrier
         sync.barrier_init(&start_barrier, 2)
-        c_ptr.thread = thread.create_and_start_with_poly_data3(s, c_ptr, &start_barrier, client_thread)
+        c.thread = thread.create_and_start_with_poly_data3(s, c, &start_barrier, client_thread)
         sync.barrier_wait(&start_barrier)
         
-        
-        log.debug("New User", c)
     }
 }
 
@@ -563,10 +538,51 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
 
     c.to_send_alloc = s.base_alloc
 
+    rb := &Response_Buffer {
+        c.sock, 
+        make([dynamic]u8, context.temp_allocator),
+    }
+
+
+    // ========= Client On Boarding =========
+
+    onboard_err := onboard_new_client(s, c, rb)
+    rb_err := rb_send(rb)
+
+    if onboard_err != nil || rb_err != nil {
+        log.errorf("Onboard Err: %v;  RB Err: %v;  Client: %v", onboard_err, rb_err, c)
+        if c.quit_mess != "" {
+            send_cmd_str(c.sock, s.name, "QUIT", c.user, c.quit_mess)
+        } else {
+            send_cmd_str(c.sock, s.name, "QUIT", c.user, ":Server has closed your connection.")
+        }
+        
+        net.close(c.sock)
+        destroy_client(c)
+        free(c, s.base_alloc)
+        return
+    }
+
+    c.full = strings.concatenate({c.user, "!u@", s.name})
+    c.flags += {.Registered}
+
+    sync.guard(&s.client_lock)
+    sync.guard(&s.nick_lock)
+    s.clients[c.user] = c
+    s.nicks[c.nick] = c.user
+
+    if len(s.clients) > s.stats.max_num_clients {
+        s.stats.max_num_clients = len(s.clients)
+    }
+
+    log.debug("New User", c)
     defer {
         sync.atomic_or(&c.flags, {.Quit})
         sync.atomic_or(&c.thread_flags, {.Has_Closed})
     }
+
+
+    // ========= Client Runner =========
 
     log.infof("Client thread for \"%v\" has started.", c.full)
 
@@ -576,11 +592,8 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
         defer free_all(context.temp_allocator)
 
         time.accurate_sleep(CLIENT_THREAD_TIMEOUT)
-
-        rb := &Response_Buffer {
-            c.sock, 
-            make([dynamic]u8, context.temp_allocator),
-        }
+        rb.data = make([dynamic]u8, context.temp_allocator)
+        
 
         mess_loop: for sync.atomic_load(&c.flags) & {.Close, .Quit} == {} {
             mess, m_err := get_message(s, c)
@@ -859,6 +872,9 @@ channel_thread :: proc(s: ^Server, c: ^Channel, _start_barrier: ^sync.Barrier) {
 }
 
 
+/*
+Handles capability negotiation. Limited to sending a single poisoned value and checking if it's not returned.
+*/
 capability_negotiation :: proc(s: ^Server, c: ^Client, in_mess: Message) -> Error  {    
     mess := in_mess
     rb := Response_Buffer{sock = c.sock}
@@ -1252,7 +1268,7 @@ parse_message_net_buf :: proc(n: ^Net_Buffer, alloc: runtime.Allocator, clone :=
 
 
 parse_message_str :: proc(str: string, alloc: runtime.Allocator, clone := false) -> (mess: Message, err: runtime.Allocator_Error) {
-    mess.raw = clone ? strings.clone(str) : str
+    mess.raw = clone ? strings.clone(str) or_return : str
     mess.recived = time.now()
 
     i: int

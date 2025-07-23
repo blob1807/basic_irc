@@ -325,7 +325,10 @@ safe_trucate :: proc(str: string, byte_idx: int) -> (res: int) {
 }
 
 
-
+/*
+Attempts to send a Message to the given Channel.
+If unable to it'll cache the Message.
+*/
 try_to_send_to_chan :: proc(c: ^Client, chan: ^Channel, mess: Message) {
     if .Close in sync.atomic_load(&chan.flags) {
         return
