@@ -12,12 +12,6 @@ main :: proc() {
         os.exit(-1)
     }
 
-    c.user = "odin"
-    c.nick = "odin"
-
-    c.server.url = "127.0.0.1:69"
-    //c.server.url = "127.0.0.1:6697"
-
     client_runner(&c)
 }
 

@@ -41,7 +41,7 @@ USER_MODES    :: "+io"
 // +l: user limit; +n: no external messages;
 CHANNEL_MODES :: "+ln" 
 
-DEFAULT_ADDRESS :: "127.0.0.1:69"
+DEFAULT_ADDRESS :: "127.0.0.1:6667"
 DEFAULT_NAME    :: "heimdall"
 DEFAULT_NETWORK :: "Bifröst"
 

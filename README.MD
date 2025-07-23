@@ -39,10 +39,12 @@ main :: proc() {
     irc.init_client(&c, "odin", url = "127.0.0.1:6697")
     defer irc.client_cleanup(&c)
 
-    // Optional get use input for config
-    /*if !irc.get_user_config(&c) {
+    // Optional get user input for config
+    /*
+    if !irc.get_user_config(&c) {
         return
-    }*/
+    }
+    */
 
     irc.client_runner(&c)
 }
