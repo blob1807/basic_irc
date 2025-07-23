@@ -22,6 +22,7 @@ main :: proc() {
     irc.init_server(&s, irc.DEFAULT_ADDRESS)
     defer irc.server_cleanup(&s)
 
+    // Optional set a Ctrl-C handler for safe shutdown.
     // irc.set_ctrl_hander()
     irc.server_runner(&s)
 }
@@ -55,5 +56,5 @@ Neither the Client or Server have been hardend nor use TLS and should NOT be use
 
 
 ## Other
-It is very likely the Client & Server don't follow common convention, as I do not use IRC. I tried to do what I belive is reasonable & makes sense.  
+It is very likely the Client & Server don't follow common conventions, as I do not use IRC. I tried to do what I belive is reasonable & makes sense.  
 I have defered to [Ergo](https://github.com/ergochat/ergo) in one or two places in the server. When I unsure what to do.
