@@ -31,8 +31,6 @@ main :: proc() {
 ```odin
 package irc_client_example
 
-import "core:log"
-import "core:os"
 import irc "basic_irc/client"
 
 main :: proc() { 
@@ -43,7 +41,7 @@ main :: proc() {
 
     // Optional get use input for config
     /*if !irc.get_user_config(&c) {
-        os.exit(-1)
+        return
     }*/
 
     irc.client_runner(&c)
