@@ -1,4 +1,3 @@
-#+feature dynamic-literals 
 package basic_irc_common
 
 import "base:runtime"
@@ -21,29 +20,29 @@ Capability :: enum {
     Away_Notify,
     Batch,
     Cap_Notify,
-    Channel_Rename, // draft
-    Chathistory,    // draft
+    Channel_Rename,       // draft
+    Chathistory,          // draft
     Chghost,
     Echo_Message,
-    Event_Playback, // draft
+    Event_Playback,       // draft
     Extended_Join,
     Extended_Monitor,
     Invite_Notify,
     Labeled_Response,
-    Message_Redaction, // draft
+    Message_Redaction,    // draft
     Message_Tags,
-    Metadata_2,        // draft
+    Metadata_2,           // draft
     Monitor,
     Multi_Prefix,
-    Multiline,         // draft
-    No_Implicit_names, // draft
-    Pre_Away,          // draft
-    Read_Marker,       // draft
+    Multiline,            // draft
+    No_Implicit_names,    // draft
+    Pre_Away,             // draft
+    Read_Marker,          // draft
     SASL,
     Server_Time,
     Setname,
     Standard_Replies,
-    TLS,              // deprecated
+    TLS,               // deprecated
     Userhost_in_Names,
 }
 
@@ -128,6 +127,7 @@ Capability_to_String_Array := [Capability]string {
 }
 
 
+/*
 String_to_Capability_Map  := map[string]Capability {
     ""                     = .Invalid,
     "account-notify"       = .Account_Notify,
@@ -161,6 +161,9 @@ String_to_Capability_Map  := map[string]Capability {
     "tls"                  = .TLS,
     "userhost-in-names"    = .Userhost_in_Names,
 }
+*/
+
+String_to_Capability_Map: map[string]Capability
 
 
 cap_to_string :: proc(c: Capability) -> (res: string, ok: bool) {
@@ -176,8 +179,12 @@ string_to_cap :: proc(str: string) -> (res: Capability, ok: bool) {
 }
 
 
+// Invalid Capabilities are ignored
 caps_to_set :: proc(cs: []Capability) -> (res: Capabilities_Set) {
     for c in cs {
+        if c < min(Capability) || c > max(Capability) {
+            continue 
+        }
         res += {c}
     }
     return
@@ -220,7 +227,7 @@ set_to_caps_str :: proc(set: Capabilities_Set, alloc: runtime.Allocator, poison 
     }
 
     if poison != "" {
-        inject_at_elems(&buf, rand.int_max(size), poison) or_return
+        inject_at_elems(&buf, rand.int_max(len(buf)-1), poison) or_return
     }
 
     shrink(&buf)
@@ -229,13 +236,14 @@ set_to_caps_str :: proc(set: Capabilities_Set, alloc: runtime.Allocator, poison 
 
 
 @(fini)
-cap_cleanup :: proc() {
+comm_cleanup :: proc() {
     delete(String_to_Capability_Map)
 }
 
 
 
-@(private)
+//@(private)
+@(init)
 comm_init :: proc() {
     String_to_Capability_Map = make(map[string]Capability, len(Capability))
     m := String_to_Capability_Map

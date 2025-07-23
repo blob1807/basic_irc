@@ -371,13 +371,13 @@ Valid_Response_Codes := #sparse [Response_Code]bool {
     .ERR_CANTKILLSERVER    = true,
     .ERR_NOOPERHOST        = true,
 
-    .ERR_UMODEUNKNOWNFLAG = true,
-    .ERR_USERSDONTMATCH   = true,
-    .ERR_HELPNOTFOUND     = true,
-    .ERR_INVALIDKEY       = true,
+    .ERR_UMODEUNKNOWNFLAG  = true,
+    .ERR_USERSDONTMATCH    = true,
+    .ERR_HELPNOTFOUND      = true,
+    .ERR_INVALIDKEY        = true,
 
-    .ERR_STARTTLS         = true,
-    .ERR_INVALIDMODEPARAM = true,
+    .ERR_STARTTLS          = true,
+    .ERR_INVALIDMODEPARAM  = true,
 
     .ERR_NOPRIVS = true,
 
