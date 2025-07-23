@@ -115,7 +115,13 @@ Server :: struct {
 }
 
 Sender_Type :: enum {
-    None, Invalid, Server, Self, User, Sys, Sys_Err,
+    None, 
+    Invalid, 
+    Server, 
+    Self, 
+    User, 
+    Sys, 
+    Sys_Err,
 }
 
 Sender :: struct {

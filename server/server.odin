@@ -72,7 +72,6 @@ init_server :: proc(
 }
 
 
-
 server_cleanup :: proc(s: ^Server, free_i_support := true) {
     for _, c in s.clients {
         if c == nil {
@@ -1038,6 +1037,7 @@ rb_send :: proc(rb: ^Response_Buffer) -> Error {
     return nil
 }
 
+
 rb_cmd :: proc(rb: ^Response_Buffer, source: string, cmd: com.RC, params: ..string) -> (err: Error) {
     buf: [MESSAGE_SIZE]byte
     i: int
@@ -1092,6 +1092,7 @@ rb_cmd :: proc(rb: ^Response_Buffer, source: string, cmd: com.RC, params: ..stri
     return
 }
 
+
 rb_cmd_str :: proc(rb: ^Response_Buffer, source: string, cmd: string, params: ..string) -> (err: Error) {
     buf: [MESSAGE_SIZE]byte
     i: int
@@ -1136,6 +1137,7 @@ rb_cmd_str :: proc(rb: ^Response_Buffer, source: string, cmd: string, params: ..
     return
 }
 
+
 rb_mess :: proc(rb: ^Response_Buffer, mess: Message, alloc: runtime.Allocator) -> (err: Error) {
     str := mess.raw
     if str == "" {
@@ -1148,7 +1150,6 @@ rb_mess :: proc(rb: ^Response_Buffer, mess: Message, alloc: runtime.Allocator) -
     _, err = append(&rb.data, str)
     return
 }
-
 
 
 recv_data :: proc(n_buf: ^Net_Buffer, sock: net.TCP_Socket) -> (err: net.Network_Error) {
@@ -1171,7 +1172,6 @@ recv_data :: proc(n_buf: ^Net_Buffer, sock: net.TCP_Socket) -> (err: net.Network
 
     return
 }
-
 
 
 reset_net_buf :: proc(n: ^Net_Buffer, zero := false) {
@@ -1422,4 +1422,3 @@ format_message :: proc(mess: Message, alloc: runtime.Allocator) -> string {
     strings.write_bytes(&sb, MESS_END)
     return strings.to_string(sb)
 }
-

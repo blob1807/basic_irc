@@ -38,6 +38,7 @@ init_client :: proc(c: ^Client, user: string, nick := "", real := "", pass := ""
 
 }
 
+
 client_cleanup :: proc(c: ^Client, free_config := false) {
     delete(c.parsed)
 
@@ -462,13 +463,16 @@ print_mess :: proc(c: ^Client, mess: Message) -> (err: Error) {
     return print_str(c, format_mess(mess, buf[:]))
 }
 
+
 eprintln :: proc(c: ^Client, vals: ..any) -> (err: Error) {
     return print_str(c, fmt.tprintln(..vals), true)
 }
 
+
 println :: proc(c: ^Client, vals: ..any) -> (err: Error) {
     return print_str(c, fmt.tprintln(..vals))
 }
+
 
 print_str :: proc(c: ^Client, str: string, is_err := false) -> (err: Error) {
     buf: [PRINT_BUFFER_SIZE]u8
@@ -540,6 +544,7 @@ read_input :: proc(c: ^Client, buf: []byte) -> (res: string, err: Error) {
     return 
 }
 
+
 server_reconnect :: proc(c: ^Client) -> Error {
     for {
         server_err := join_server(c, c.server.url)
@@ -566,6 +571,7 @@ server_reconnect :: proc(c: ^Client) -> Error {
     }
     return nil
 }
+
 
 recv_thread :: proc(c: ^Client) {
     if len(c.parsed) != 0 {
@@ -656,6 +662,7 @@ disable_raw_input :: proc() {
 
 /* ========== Client Runner ==========*/
 
+
 HELP :: `
 ================================================================================================
 
@@ -687,6 +694,7 @@ HELP :: `
 
 ================================================================================================
 `
+
 
 client_runner :: proc(c: ^Client) {
 
@@ -842,6 +850,7 @@ client_runner :: proc(c: ^Client) {
 
     return
 }
+
 
 get_user_config :: proc(c: ^Client) -> bool {
     buf: [64]byte

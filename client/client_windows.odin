@@ -9,6 +9,7 @@ import win "core:sys/windows"
 @(private="file")
 default_cp: win.CODEPAGE
 
+
 @(private)
 ctrl_handler :: proc "system" (dwCtrlType: win.DWORD) -> win.BOOL {
     if dwCtrlType == win.CTRL_C_EVENT {

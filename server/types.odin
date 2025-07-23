@@ -131,8 +131,8 @@ Net_Buffer :: struct {
 
 Timer :: struct {
     duration: time.Duration,
-    left: time.Duration,
-    last: time.Tick,
+    left:     time.Duration,
+    last:     time.Tick,
 }
 
 
@@ -152,35 +152,34 @@ Server_Flags :: bit_set[Server_Flag]
 
 
 Server :: struct {
-    name: string,
-    
+    name:    string,
     address: string,
-    sock: net.TCP_Socket,
-    ep:   net.Endpoint,
+    sock:    net.TCP_Socket,
+    ep:      net.Endpoint,
 
     net_buf: Net_Buffer,
 
-    base_alloc: runtime.Allocator,
+    base_alloc:  runtime.Allocator,
     base_logger: runtime.Logger,
 
-    nicks:    map[string]string,  //     nick -> username
-    clients:  map[string]^Client, // username -> Client
+    nicks:       map[string]string,  //     nick -> username
+    clients:     map[string]^Client, // username -> Client
     nick_lock:   sync.Ticket_Mutex,
     client_lock: sync.Ticket_Mutex,
     
-    channels: map[string]^Channel,
+    channels:    map[string]^Channel,
     channs_lock: sync.Ticket_Mutex, 
 
     close_client_threads:    bool, // atmoic
     close_channel_threads:   bool, // atmoic
     close_new_client_thread: bool, // atmoic
-    close_server: bool,  // atmoic
+    close_server:            bool,  // atmoic
 
     flags: Server_Flags, // atmoic
     // caps:  common.Capabilities_Set,
 
     using i_support: I_Support,
-    i_support_str: string,
+    i_support_str:   string,
 
     stats: Server_Stats,
     info:  Server_Info,
@@ -190,8 +189,9 @@ Server :: struct {
     onboard_timeout: time.Duration,
     
     timers: struct {
-        ping, ping_check: Timer,
-        client_cleanup:   Timer,
+        ping:           Timer, 
+        ping_check:     Timer,
+        client_cleanup: Timer,
     },
 }
 
@@ -203,15 +203,21 @@ Server_Stats :: struct {
 
 Server_Info :: struct {
     created: time.Time,
-    tz: ^datetime.TZ_Region,
+    tz:      ^datetime.TZ_Region,
     version: string,
 }
 
 
 
 Client_Flag :: enum {
-    Close, Pinged, Ping_Failed, Invisable, Op, Errored,
-    Quit, Registered,
+    Close, 
+    Pinged, 
+    Ping_Failed, 
+    Invisable, 
+    Op, 
+    Errored,
+    Quit, 
+    Registered,
 }
 
 Client_Flags :: bit_set[Client_Flag]
@@ -228,13 +234,13 @@ Client :: struct {
     net_buf: Net_Buffer,
     
     flags: Client_Flags, // atmoic
-    caps: common.Capabilities_Set,
+    caps:  common.Capabilities_Set,
 
     ping_token: string `fmt:"q"`,
-    pinged: time.Tick,
+    pinged:     time.Tick,
 
-    chans:   [dynamic]string,
-    to_send: [dynamic]Message, 
+    chans:        [dynamic]string,
+    to_send:      [dynamic]Message, 
     to_send_lock: sync.Mutex,
 
     // Messages WILL have their `raw` field allocated to the dest's allocator
@@ -242,8 +248,9 @@ Client :: struct {
 
     to_send_alloc: runtime.Allocator,
 
-    thread: ^thread.Thread,
+    thread:       ^thread.Thread,
     thread_flags: Thread_Flags, // atomic
+    
     lock: sync.Mutex,
 
     quit_mess: string `fmt:"q"`,
@@ -259,10 +266,16 @@ Channel_Flag :: enum {
 Channel_Flags :: bit_set[Channel_Flag]
 
 Channel_Mode :: enum {
-    Ban, Exception, Client_Limit, 
-    Invite_Only, Invite_Exception, 
-    Key, Moderated, Secret, 
-    Protected_Topic, No_Exteral_Messages,
+    Ban, 
+    Exception, 
+    Client_Limit, 
+    Invite_Only, 
+    Invite_Exception, 
+    Key, 
+    Moderated, 
+    Secret, 
+    Protected_Topic, 
+    No_Exteral_Messages,
 }
 
 Channel_Modes :: bit_set[Channel_Mode]
@@ -272,8 +285,8 @@ Channel :: struct {
     admin: [dynamic]string,  // usernames
     users: [dynamic]^Client,
 
-    to_remove: [dynamic]^Client, 
-    to_send:   [dynamic]Message, 
+    to_remove:    [dynamic]^Client, 
+    to_send:      [dynamic]Message, 
     to_send_lock: sync.Mutex,
 
     to_send_alloc: runtime.Allocator,
@@ -281,10 +294,12 @@ Channel :: struct {
     flags: Channel_Flags, // atmoic
 
     modes: Channel_Modes,
+
     user_limit: int,
 
-    thread: ^thread.Thread,
+    thread:       ^thread.Thread,
     thread_flags: Thread_Flags, // atomic
+
     lock: sync.Mutex,
 }
 

@@ -186,6 +186,7 @@ ERR_RANGES := [?]struct {s, e: Response_Code} {
     {RC(902), RC(902)}, {RC(904), RC(907)}, 
 }
 
+
 is_reply_code :: proc(code: Response_Code) -> bool {
     if code < min(Response_Code) || code > max(Response_Code) {
         return false
@@ -212,11 +213,11 @@ is_error_code :: proc(code: Response_Code) -> bool {
     return false
 }
 
+
 @(private)
 is_valid_code_range :: proc(code: Response_Code) -> bool {
     return is_reply_code(code) || is_error_code(code)
 }
-
 
 
 is_valid_code :: proc(code: Response_Code) -> bool {
@@ -390,4 +391,3 @@ Valid_Response_Codes := #sparse [Response_Code]bool {
     // IRCv3 Errors
     .ERR_INVALIDCAPCMD = true,
 }
-

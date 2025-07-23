@@ -58,6 +58,7 @@ is_valid_user :: proc(user: string) -> bool {
     return true
 }
 
+
 is_valid_real :: proc(real: string) -> bool {
     if real == "" {
         return false
@@ -153,4 +154,3 @@ is_equal_utf8 :: proc(a_in, b_in: string) -> bool {
 
     return _a == "" && _b == ""
 }
-

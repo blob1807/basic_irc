@@ -751,4 +751,3 @@ cmd_cap :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message, poi
 
     return
 }
-

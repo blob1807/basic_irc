@@ -47,7 +47,7 @@ _enable_raw_mode :: proc() {
 	assert(res == .OK)
 }
 
+
 _disable_raw_mode :: proc "c" () {
 	psx.tcsetattr(psx.STDIN_FILENO, .TCSANOW, &orig_mode)
 }
-

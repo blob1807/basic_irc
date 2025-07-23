@@ -15,7 +15,6 @@ import "core:encoding/json"
 
 @(require) import "core:fmt"
 
-
 import com "../common"
 
 
@@ -303,7 +302,6 @@ trucate_to_rune :: proc(str: string, byte_idx: int) -> (res: int) {
 }
 
 
-
 /*
 Tries to get the byte index to safely trucate the input string to the end 
 of first the closest grapheme then rune less then or equal to the given byte index.
@@ -346,7 +344,6 @@ try_to_send_to_chan :: proc(c: ^Client, chan: ^Channel, mess: Message) {
     }
     append(&c.mess_cache, to_send)
 }
-
 
 
 format_server_time :: proc(tz: ^datetime.TZ_Region, alloc: runtime.Allocator) -> string {
