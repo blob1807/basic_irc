@@ -21,7 +21,7 @@ import "../common"
 
 
 // Zeros the given Client
-init_client :: proc(c: ^Client, user: string, nick := "", real := "", pass := "", url := "", alloc := context.allocator) {
+init_client :: proc(c: ^Client, user: string, url: string, nick := "", real := "", pass := "", alloc := context.allocator) {
     runtime.mem_zero(c, size_of(Client))
 
     c.user = user
@@ -43,11 +43,11 @@ client_cleanup :: proc(c: ^Client, free_config := false) {
     delete(c.parsed)
 
     if free_config {
-    delete(c.user)
-    delete(c.server.url)
-    delete(c.nick)
-    delete(c.chan)
-    delete(c.pass)
+        delete(c.user)
+        delete(c.server.url)
+        delete(c.nick)
+        delete(c.chan)
+        delete(c.pass)
     }
 }
 
@@ -64,7 +64,6 @@ pop_message :: proc(c: ^Client, pos := -1, loc := #caller_location) -> (ok: bool
     }
 
     if pos > -1 {
-        log.debug(loc)
         c.net.pos = copy(c.net.buf[:], c.net.buf[pos+2:c.net.pos])
         return true
     }
@@ -109,21 +108,26 @@ recv_data :: proc(c: ^Client) -> (err: net.Network_Error) {
 
 
 send_message :: proc(c: ^Client, mess: string) -> (err: Error) {
-    if len(mess) > (MAX_MESSAGE_SIZE - len(c.chan) + len("PRIVMSG  :\r\n")) {
+    if len(mess) > (MESSAGE_SIZE - len(c.chan) + len("PRIVMSG  :\r\n")) {
         print_str(c, "ERROR: Message is to long.", true)
         return IRC_Errors.Message_To_Big
     }
 
-    return send_command(c.sock, "PRIVMSG ", c.chan, " :", mess, "\r\n")
+    return send_command(c.sock, "PRIVMSG ", c.chan, " :", mess)
 }
 
 
 send_command :: proc(sock: net.TCP_Socket, cmd: ..string) -> (err: net.Network_Error) {
     i: int
-    buf: [MAX_MESSAGE_SIZE]byte
+    buf: [MESSAGE_SIZE]byte
     for p in cmd { 
         i += copy(buf[i:], p)
     }
+
+    if i == MESSAGE_SIZE {
+        i -= 2
+    }
+    i += copy(buf[i:], MESS_END)
 
     n := net.send_tcp(sock, buf[:i]) or_return
     assert(n == i)
@@ -133,14 +137,14 @@ send_command :: proc(sock: net.TCP_Socket, cmd: ..string) -> (err: net.Network_E
 
 
 join_chan :: proc(c: ^Client, chan: string) -> (err: net.Network_Error) {
-    send_command(c.sock, "JOIN ", chan, "\r\n") or_return
+    send_command(c.sock, "JOIN ", chan) or_return
     c.chan = chan
     return
 }
 
 
 leave_chan :: proc(c: ^Client, leave_mess := "") -> (err: net.Network_Error) {
-    send_command(c.sock, "PART ", c.chan, " ", leave_mess, "\r\n") or_return
+    send_command(c.sock, "PART ", c.chan, " ", leave_mess) or_return
     c.chan = ""
     return
 }
@@ -149,9 +153,9 @@ leave_chan :: proc(c: ^Client, leave_mess := "") -> (err: net.Network_Error) {
 leave_server :: proc(c: ^Client, leave_mess := "") -> (err: net.Network_Error) {
     leave_chan(c, leave_mess) or_return
     if leave_mess != "" {
-        send_command(c.sock, "QUIT ", leave_mess, " \r\n") or_return
+        send_command(c.sock, "QUIT ", leave_mess) or_return
     } else {
-        send_command(c.sock, "QUIT \r\n") or_return
+        send_command(c.sock, "QUIT") or_return
     }
     
     time.sleep(time.Second)
@@ -177,11 +181,11 @@ join_server :: proc(c: ^Client, dst: string, alloc := context.allocator) -> (err
     mess: Message
 
     if c.pass != "" {
-        send_command(sock, "PASS ", c.pass, "\r\n") or_return
+        send_command(sock, "PASS ", c.pass) or_return
         // TODO: Error from server
     }
 
-    send_command(sock, "NICK ", c.nick, "\r\n") or_return
+    send_command(sock, "NICK ", c.nick) or_return
     log.debug("Sent Nick", c.nick)
     mess, err = get_messaage(c)
     if v, o := err.(net.Network_Error); o {
@@ -201,7 +205,7 @@ join_server :: proc(c: ^Client, dst: string, alloc := context.allocator) -> (err
         return .Join_Server_Fail
     }
 
-    send_command(sock, "USER ", c.user, " 0 * :", c.nick, "\r\n") or_return
+    send_command(sock, "USER ", c.user, " 0 * :", c.nick) or_return
     log.debug("Sent User", c.user)
     mess, err = get_messaage(c)
     if v, o := err.(net.Network_Error); o {
@@ -267,9 +271,9 @@ join_server :: proc(c: ^Client, dst: string, alloc := context.allocator) -> (err
 
             } else if mess.cmd == "PING" {
                 if len(mess.params) != 0 {
-                    send_command(sock, "PONG", mess.params[0], "\r\n")
+                    send_command(sock, "PONG", mess.params[0])
                 } else {
-                    send_command(sock, "PONG \r\n")
+                    send_command(sock, "PONG")
                 }
                 
             }
@@ -317,7 +321,7 @@ parse_message :: proc(c: ^Client, clone_mess := false, pop_mess := false, alloc 
         mess.sender.name = sender
         
         // TODO: Probably slower then what I had but is "more" correct
-        ai := strings.index_rune(sender, '!')
+        ai := strings.index_byte(sender, '!')
         if len(sender) <= ai {
             mess.sender.type = .Invalid
 
@@ -325,7 +329,7 @@ parse_message :: proc(c: ^Client, clone_mess := false, pop_mess := false, alloc 
             mess.sender.type = .Server
 
         } else {
-            bi := strings.index_rune(sender[ai:], '@')
+            bi := strings.index_byte(sender[ai:], '@')
             if len(sender[ai:]) <= bi {
                 mess.sender.type = .Invalid
 
@@ -439,7 +443,7 @@ format_mess :: proc(mess: Message, buf: []u8) -> (res: string) {
     } else {
         strings.write_string(&sb, " Invalid Code <")
         strings.write_int(&sb, int(mess.code))
-        strings.write_string(&sb, ">")
+        strings.write_byte(&sb, '>')
     }
 
     if len(mess.params) > 0 {
@@ -627,9 +631,9 @@ recv_thread :: proc(c: ^Client) {
             
             } else if mess.cmd == "PING" {
                 if len(mess.params) != 0 {
-                    err = send_command(c.sock, "PONG ", mess.params[0], MESS_END_STR)
+                    err = send_command(c.sock, "PONG ", mess.params[0])
                 } else {
-                    err = send_command(c.sock, "PONG \r\n")
+                    err = send_command(c.sock, "PONG")
                 }
                 
                 if err != nil {
@@ -852,7 +856,9 @@ client_runner :: proc(c: ^Client) {
 }
 
 
-get_user_config :: proc(c: ^Client) -> bool {
+get_user_config :: proc(c: ^Client, allocator := context.allocator) -> bool {
+    context.allocator = allocator
+
     buf: [64]byte
     str: string
 
@@ -872,7 +878,7 @@ get_user_config :: proc(c: ^Client) -> bool {
     c.user = strings.clone(str)
 
 
-    fmt.print("  Server URL: ")
+    fmt.print("    Server URL: ")
     n, read_err = os.read(os.stdin, buf[:])
     if read_err != nil {
         fmt.eprintln("ERROR: Failed to read input:", read_err)
@@ -903,7 +909,7 @@ get_user_config :: proc(c: ^Client) -> bool {
     }
 
 
-    fmt.print("     Channel: ") 
+    fmt.print("    Channel: ") 
     n, read_err = os.read(os.stdin, buf[:])
     if read_err != nil {
         fmt.eprintln("ERROR: Failed to read input:", read_err)
