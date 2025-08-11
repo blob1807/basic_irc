@@ -67,6 +67,7 @@ IRC_Errors :: enum {
     Cmd_Error,
 }
 
+
 Error :: union #shared_nil { 
     runtime.Allocator_Error, 
     net.Network_Error, 
@@ -108,11 +109,13 @@ Client :: struct {
     close_barrier: sync.Barrier,
 }
 
+
 Server :: struct {
     url:    string, 
     name:   string, 
     socket: net.Socket, 
 }
+
 
 Sender_Type :: enum {
     None, 
@@ -124,10 +127,12 @@ Sender_Type :: enum {
     Sys_Err,
 }
 
+
 Sender :: struct {
     name: string,
     type: Sender_Type,
 }
+
 
 Message :: struct {
     recived: time.Time,
@@ -140,3 +145,4 @@ Message :: struct {
     params:  []string,
     tail:    string,
 }
+
