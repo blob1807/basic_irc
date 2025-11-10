@@ -33,8 +33,8 @@ init_client :: proc(c: ^Client, user: string, url: string, nick := "", real := "
 
     c.parsed = make([dynamic]Message, 0, 5, alloc)
 
-    sync.barrier_init(&c.pause_barrier, 3)
-    sync.barrier_init(&c.close_barrier, 3)
+    sync.barrier_init(&c.pause_barrier, 2)
+    sync.barrier_init(&c.close_barrier, 2)
 
 }
 
@@ -87,7 +87,7 @@ destroy_message :: proc(mess: Message, free_raw := false, alloc := context.alloc
 
 recv_data :: proc(c: ^Client) -> (err: net.Network_Error) {
     buf: [NET_READ_SIZE]byte
-    s,l: int
+    s: int
 
     for c.net.pos < MAX_MESSAGE_SIZE {
         s, err = net.recv_tcp(c.sock, buf[:])
@@ -96,11 +96,9 @@ recv_data :: proc(c: ^Client) -> (err: net.Network_Error) {
             c.net.pos += copy(c.net.buf[c.net.pos:], buf[:s])
         }
 
-        if err != nil || bytes.contains(buf[l:s], MESS_END) {
+        if err != nil || bytes.contains(buf[:s], MESS_END) || s == 0 {
             break
         }
-
-        l = s
     }
 
     return
@@ -758,6 +756,7 @@ client_runner :: proc(c: ^Client) {
                 log.debug("Quiting")
                 leave_server(c, mess)
 
+                log.debug("Waiting on other threads")
                 sync.atomic_store(&c.close_thread, true)
                 sync.barrier_wait(&c.close_barrier)
 
