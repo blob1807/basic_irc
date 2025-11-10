@@ -15,6 +15,9 @@ import "core:encoding/json"
 import "../common"
 
 
+IRC_SERVER_DEBUG :: #config(IRC_SERVER_DEBUG, true) //#config(IRC_SERVER_DEBUG, ODIN_DEBUG)
+
+
 TAGS_SIZE         :: 8191
 MESSAGE_SIZE      :: 512
 MAX_MESSAGE_SIZE  :: TAGS_SIZE + MESSAGE_SIZE
@@ -91,6 +94,7 @@ IRC_Errors :: enum {
     Message_To_Big, 
     Sent_More_Data_Then_Given, 
     Failed_To_Send_Message, 
+    Not_Enough_Data,
 
     Join_Server_Fail,
 
@@ -106,7 +110,8 @@ IRC_Errors :: enum {
 
 Error :: union #shared_nil { 
     runtime.Allocator_Error, 
-    net.Network_Error, 
+    net.TCP_Send_Error, 
+    net.TCP_Recv_Error,
     os.Error,
     io.Error,
     json.Unmarshal_Error,
@@ -152,39 +157,42 @@ Server_Flags :: bit_set[Server_Flag]
 
 
 Server :: struct {
-    name:    string,
-    address: string,
+    name:    string `fmt:"q"`,
+    address: string `fmt:"q"`,
     sock:    net.TCP_Socket,
     ep:      net.Endpoint,
 
     net_buf: Net_Buffer,
 
+    // This Allocator needs to be Thread Safe as 
+    // it's used for allocations that are shared & freeed
+    // across multiple threads.
     base_alloc:  runtime.Allocator,
     base_logger: runtime.Logger,
 
-    nicks:       map[string]string,  //     nick -> username
-    clients:     map[string]^Client, // username -> Client
-    nick_lock:   sync.Ticket_Mutex,
-    client_lock: sync.Ticket_Mutex,
+    nicks:       map[string]string  `fmt:"q"`, //     nick -> username
+    clients:     map[string]^Client `fmt:"q"`, // username -> Client
+    nick_lock:   sync.Mutex,
+    client_lock: sync.Mutex,
     
-    channels:    map[string]^Channel,
-    channs_lock: sync.Ticket_Mutex, 
+    channels:    map[string]^Channel `fmt:"q"`,
+    channs_lock: sync.Mutex, 
 
     close_client_threads:    bool, // atmoic
     close_channel_threads:   bool, // atmoic
     close_new_client_thread: bool, // atmoic
-    close_server:            bool,  // atmoic
+    close_server:            bool, // atmoic
 
     flags: Server_Flags, // atmoic
     // caps:  common.Capabilities_Set,
 
     using i_support: I_Support,
-    i_support_str:   string,
+    i_support_str:   string `fmt:"q"`,
 
     stats: Server_Stats,
     info:  Server_Info,
 
-    admins: [dynamic]string, // usernames
+    admins: [dynamic]string `fmt:"q"`, // usernames
 
     onboard_timeout: time.Duration,
     
@@ -193,6 +201,8 @@ Server :: struct {
         ping_check:     Timer,
         client_cleanup: Timer,
     },
+
+    open_connection_thread: ^thread.Thread,
 }
 
 
@@ -204,7 +214,7 @@ Server_Stats :: struct {
 Server_Info :: struct {
     created: time.Time,
     tz:      ^datetime.TZ_Region,
-    version: string,
+    version: string `fmt:"q"`,
 }
 
 
@@ -239,7 +249,7 @@ Client :: struct {
     ping_token: string `fmt:"q"`,
     pinged:     time.Tick,
 
-    chans:        [dynamic]string,
+    chans:        [dynamic]string `fmt:"q"`,
     to_send:      [dynamic]Message, 
     to_send_lock: sync.Mutex,
 
@@ -281,8 +291,8 @@ Channel_Mode :: enum {
 Channel_Modes :: bit_set[Channel_Mode]
 
 Channel :: struct {
-    name:  string,
-    admin: [dynamic]string,  // usernames
+    name:  string `fmt:"q"`,
+    admin: [dynamic]string `fmt:"q"`,  // usernames
     users: [dynamic]^Client,
 
     to_remove:    [dynamic]^Client, 
@@ -334,15 +344,15 @@ Cached_Message :: struct {
 
 
 I_Support :: struct {
-    case_map:   string, // only "ascii"
+    case_map:   string `fmt:"q"`, // only "ascii"
 
     chan_limit: struct{mode: byte, limit: int}, // only set "#"
     chan_modes: [2]byte, // see CHANNEL_MODES
-    chan_types: string,  // only "#"
+    chan_types: string `fmt:"q"`,  // only "#"
 
     max_targets: int,
 
-    network:  string,
+    network:  string `fmt:"q"`,
     nick_len: int,
 
     status_msg: string, // only "@" & "+"
@@ -351,9 +361,9 @@ I_Support :: struct {
 
 
 Config :: struct {
-    name:    string,
-    address: string,
-    admins:  []string,
+    name:    string `fmt:"q"`,
+    address: string `fmt:"q"`,
+    admins:  []string `fmt:"q"`,
 
     // caps_set: common.Capabilities_Set,
     // caps_arr: []common.Capability,
