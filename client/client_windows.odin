@@ -21,7 +21,8 @@ ctrl_handler :: proc "system" (dwCtrlType: win.DWORD) -> win.BOOL {
 
 
 @(init)
-init :: proc() {
+init :: proc "contextless" () {
+    context = runtime.default_context()
     default_cp = win.GetConsoleOutputCP()
 
     if win.SetConsoleCtrlHandler(ctrl_handler, true) == win.FALSE {
@@ -61,7 +62,8 @@ init :: proc() {
 }
 
 @(fini)
-fini :: proc() {
+fini :: proc "contextless" () {
+    context = runtime.default_context()
     if win.SetConsoleOutputCP(default_cp) == win.FALSE {
         err := win.GetLastError()
         fmt.eprintfln("Unable to reset console output\nError: %v (%v)", win.System_Error(err), err)

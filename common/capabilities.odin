@@ -163,6 +163,7 @@ String_to_Capability_Map  := map[string]Capability {
 }
 */
 
+
 String_to_Capability_Map: map[string]Capability
 
 
@@ -236,7 +237,8 @@ set_to_caps_str :: proc(set: Capabilities_Set, alloc: runtime.Allocator, poison 
 
 
 @(fini)
-comm_cleanup :: proc() {
+comm_cleanup :: proc "contextless" () {
+    context = runtime.default_context()
     delete(String_to_Capability_Map)
 }
 
@@ -244,7 +246,9 @@ comm_cleanup :: proc() {
 
 //@(private)
 @(init)
-comm_init :: proc() {
+comm_init :: proc "contextless" () {
+    context = runtime.default_context()
+
     String_to_Capability_Map = make(map[string]Capability, len(Capability))
     m := String_to_Capability_Map
     m[""]                     = .Invalid

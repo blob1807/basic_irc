@@ -20,7 +20,7 @@ sig_handler :: proc "c" (sig: c.int) {
 
 
 @(init)
-init :: proc() {
+init :: proc "contextless" () {
     // Reset to the original attributes at the end of the program.
     psx.atexit(disable_raw_mode)
     psx.signal(psx.SIGINT, sig_handler)
@@ -28,7 +28,7 @@ init :: proc() {
 
 
 @(fini)
-fini :: proc() {
+fini :: proc "contextless" () {
     _disable_raw_mode()
 }
 
