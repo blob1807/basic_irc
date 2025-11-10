@@ -45,11 +45,13 @@ cmd_join :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
         sync.lock(&s.channs_lock)
         ch, ok := s.channels[chan]
         if !ok {
+            defer sync.unlock(&s.channs_lock)
             rb_cmd(rb, s.name, .ERR_NOSUCHCHANNEL, c.nick, chan, ":no such channel") or_return
             continue
         }
 
         if .Client_Limit in ch.modes && len(ch.users) >= ch.user_limit {
+            defer sync.unlock(&s.channs_lock)
             rb_cmd(rb, s.name, .ERR_CHANNELISFULL, c.nick, chan, ":Cannot join channel (+l)") or_return
             continue
         }
@@ -67,10 +69,9 @@ cmd_join :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
         sync.unlock(&ch.lock)
 
         try_to_send_to_chan(c, ch, out)
-        
-        append(&c.chans, chan_clone)
         sync.unlock(&s.channs_lock)
 
+        append(&c.chans, chan_clone) 
         rb_mess(rb, out, context.temp_allocator) or_return
 
         cmd_names(s, c, rb, Message{params={chan}})
@@ -273,8 +274,9 @@ cmd_names :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -
         left := MESSAGE_SIZE - len(to_send.raw)
         
         pos: int
-        sync.guard(&s.client_lock)
+        
         sync.guard(&chan.lock)
+        sync.guard(&s.client_lock)
 
         for pos < len(chan.users) {
             strings.write_byte(&sb, ':')
@@ -388,13 +390,10 @@ cmd_ping :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
     err = recv_data(&c.net_buf, c.sock)
 
     #partial switch v in err {
-    case net.Network_Error:
-        #partial switch e in v {
-        case net.TCP_Recv_Error:
-            #partial switch e {
-            case .Timeout:
-                err = nil
-            }
+    case net.TCP_Recv_Error:
+        #partial switch v {
+        case .Timeout:
+            err = nil
         }
     }
 

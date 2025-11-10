@@ -20,6 +20,8 @@ import "core:mem/virtual"
 import "core:time/timezone"
 import "core:encoding/uuid"
 
+import win "core:sys/windows"
+
 import com "../common"
 
 
@@ -168,6 +170,7 @@ server_runner :: proc(s: ^Server) -> (err: Error) {
     }
 
     new_c_thread := thread.create_and_start_with_poly_data(s, open_new_clients_thread)
+    s.open_connection_thread = new_c_thread
     log.debug("Connection opening thread started")
 
     start_timer(&s.timers.ping)
@@ -331,6 +334,7 @@ Handles the accepting of new client connections & opening of client threads.
 */
 open_new_clients_thread :: proc(s: ^Server) {
     assert(context.temp_allocator.procedure == runtime.default_temp_allocator_proc)
+    win.SetThreadDescription(s.open_connection_thread.win32_thread, win.L("Open New CLients Thread"))
 
     context.logger = s.base_logger
     context.allocator = s.base_alloc
@@ -341,7 +345,7 @@ open_new_clients_thread :: proc(s: ^Server) {
 
         c_sock, source, net_err := net.accept_tcp(s.sock)
         if net_err != nil {
-            log.error("Failed to accept tcp connection.", net_err)
+            log.error("Failed to accept tcp connection. Socket \"%v\";; Source \"%v\";; Error \"%v\"", c_sock, source, net_err)
             continue
         }
         if sync.atomic_load(&s.close_new_client_thread) {
@@ -527,6 +531,8 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
 
 client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
     assert(context.temp_allocator.procedure == runtime.default_temp_allocator_proc)
+    thread_desc := win.utf8_to_wstring_alloc(fmt.tprint("Client Thread:", c.user))
+    win.SetThreadDescription(c.thread.win32_thread, thread_desc)
 
     start_barrier := _start_barrier
     sync.barrier_wait(start_barrier)
@@ -546,10 +552,10 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
     // ========= Client On Boarding =========
 
     onboard_err := onboard_new_client(s, c, rb)
-    rb_err := rb_send(rb)
+    _, rb_err := rb_send(rb)
 
     if onboard_err != nil || rb_err != nil {
-        log.errorf("Onboard Err: %v;  RB Err: %v;  Client: %v", onboard_err, rb_err, c)
+        log.errorf("Onboard Err: %v;;  RB Err: %v;;  Client: %v", onboard_err, rb_err, c)
         if c.quit_mess != "" {
             send_cmd_str(c.sock, s.name, "QUIT", c.user, c.quit_mess)
         } else {
@@ -565,10 +571,14 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
     c.full = strings.concatenate({c.user, "!u@", s.name})
     c.flags += {.Registered}
 
-    sync.guard(&s.client_lock)
-    sync.guard(&s.nick_lock)
+
+    sync.lock(&s.client_lock)
     s.clients[c.user] = c
+    sync.lock(&s.nick_lock)
+
+    sync.unlock(&s.client_lock)
     s.nicks[c.nick] = c.user
+    sync.unlock(&s.nick_lock)
 
     if len(s.clients) > s.stats.max_num_clients {
         s.stats.max_num_clients = len(s.clients)
@@ -656,9 +666,8 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
 
                 sync.atomic_or(&c.flags, {.Errored})
 
-            case net.Network_Error:
-                tcp_err, ok := v.(net.TCP_Recv_Error)
-                if ok && tcp_err == .Timeout {
+            case net.TCP_Recv_Error:
+                if v == .Timeout {
                     // log.debug("Timeout from", c.nick)
                     break mess_loop
                 }
@@ -680,7 +689,7 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
             }
         }
 
-        err := rb_send(rb)
+        _, err := rb_send(rb)
 
         if sync.try_lock(&c.to_send_lock) {
             for mess in c.to_send {
@@ -691,7 +700,7 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
             clear(&c.to_send)
             sync.unlock(&c.to_send_lock)
 
-            err = rb_send(rb)
+            _, err = rb_send(rb)
         }
 
         if .Pinging in sync.atomic_load(&s.flags) {
@@ -795,6 +804,8 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
 
 channel_thread :: proc(s: ^Server, c: ^Channel, _start_barrier: ^sync.Barrier) {
     assert(context.temp_allocator.procedure == runtime.default_temp_allocator_proc)
+    thread_desc := win.utf8_to_wstring_alloc(fmt.tprint("Channel Thread:", c.name))
+    win.SetThreadDescription(c.thread.win32_thread, thread_desc)
 
     start_barrier := _start_barrier
     sync.barrier_wait(start_barrier)
@@ -817,7 +828,7 @@ channel_thread :: proc(s: ^Server, c: ^Channel, _start_barrier: ^sync.Barrier) {
 
         time.accurate_sleep(CHANNEL_THREAD_TIMEOUT)
 
-        sync.lock(&c.lock)
+        sync.guard(&c.lock)
 
         for cl in c.to_remove {
             i, ok := slice.linear_search(c.users[:], cl)
@@ -828,13 +839,15 @@ channel_thread :: proc(s: ^Server, c: ^Channel, _start_barrier: ^sync.Barrier) {
         clear(&c.to_remove)
 
         #reverse for user, pos in c.users { 
-            sync.lock(&s.client_lock)
-            if user.user not_in s.clients || .Quit in sync.atomic_load(&user.flags) {
-                unordered_remove(&c.users, pos)
-                sync.unlock(&s.client_lock)
-                continue
+            if sync.try_lock(&s.client_lock) {
+                defer sync.unlock(&s.client_lock)
+
+                if user.user not_in s.clients || .Quit in sync.atomic_load(&user.flags) {
+                    unordered_remove(&c.users, pos)   
+                    continue
+                }
             }
-            sync.unlock(&s.client_lock)
+            
 
             if sync.try_lock(&user.lock) {
                 sync.guard(&user.to_send_lock)
@@ -858,8 +871,6 @@ channel_thread :: proc(s: ^Server, c: ^Channel, _start_barrier: ^sync.Barrier) {
             
         }
         clear(&c.to_send)
-
-        sync.unlock(&c.lock)
 
         if .Close in sync.atomic_load(&c.flags) {
             break
@@ -888,7 +899,7 @@ capability_negotiation :: proc(s: ^Server, c: ^Client, in_mess: Message) -> Erro
         to_lower(poison)
     }
 
-    log.debugf("Poisoned Capability %q", poison)
+    log.debugf("User %q: Poisoned Capability %q", c.full, poison)
 
     for {
         fmt.println(mess)
@@ -910,32 +921,41 @@ capability_negotiation :: proc(s: ^Server, c: ^Client, in_mess: Message) -> Erro
 }
 
 
-send_bytes :: proc(sock: net.TCP_Socket, buf: []u8) -> Error {
+send_bytes :: proc(sock: net.TCP_Socket, buf: []u8) -> (int, Error) {
     switch {
     case len(buf) <= 0:
-        return nil
+        return 0, nil
+    case len(buf) < 2:
+        return 0, IRC_Errors.Not_Enough_Data
     case len(buf) > MESSAGE_SIZE:
-        return IRC_Errors.Message_To_Big
+        return 0, IRC_Errors.Message_To_Big
     case string(buf[len(buf)-2:]) != MESS_END_STR:
-        return IRC_Errors.No_End_Of_Message
+        return 0, IRC_Errors.No_End_Of_Message
     }
 
     n, err := net.send_tcp(sock, buf)
     if err != nil {
-        return net.Network_Error(err)
+        return 0, err
     }
 
-    log.assertf(n == len(buf), "%v != %v;; mess = %q", n, len(buf), string(buf))
-    return nil
+    when IRC_SERVER_DEBUG {
+        log.assertf (
+            n == len(buf), 
+            "Not all data sent;; %v != %v;; mess = %q;; sent = %q", 
+            len(buf), n, string(buf), string(buf[:n])
+        )
+    }
+
+    return n, nil if n == len(buf) else IRC_Errors.Failed_To_Send_Message
 }
 
 
-send_string :: proc(sock: net.TCP_Socket, mess: string) -> (err: Error) {
+send_string :: proc(sock: net.TCP_Socket, mess: string) -> (n: int, err: Error) {
     return send_bytes(sock, transmute([]u8)mess)
 }
 
 
-send_message :: proc(sock: net.TCP_Socket, mess: Message) -> (err: Error) {
+send_message :: proc(sock: net.TCP_Socket, mess: Message) -> (n: int, err: Error) {
     str := mess.raw
     if str == "" {
         str = format_message(mess, context.temp_allocator)
@@ -944,7 +964,7 @@ send_message :: proc(sock: net.TCP_Socket, mess: Message) -> (err: Error) {
 }
 
 
-send_cmd_str :: proc(sock: net.TCP_Socket, source: string, cmd: string, params: ..string) -> (err: Error) {
+send_cmd_str :: proc(sock: net.TCP_Socket, source: string, cmd: string, params: ..string) -> (n: int, err: Error) {
     buf: [MESSAGE_SIZE]byte
     i: int
 
@@ -964,7 +984,7 @@ send_cmd_str :: proc(sock: net.TCP_Socket, source: string, cmd: string, params: 
 
     for p in params { 
         if MESSAGE_SIZE-2 <= len(p) + i + 1 {
-            return IRC_Errors.Message_To_Big
+            return 0, IRC_Errors.Message_To_Big
         }
 
         i += copy(buf[i:], p)
@@ -978,7 +998,7 @@ send_cmd_str :: proc(sock: net.TCP_Socket, source: string, cmd: string, params: 
 }
 
 
-send_cmd :: proc(sock: net.TCP_Socket, source: string, cmd: com.RC, params: ..string) -> (err: Error) {
+send_cmd :: proc(sock: net.TCP_Socket, source: string, cmd: com.RC, params: ..string) -> (n: int, err: Error) {
     buf: [MESSAGE_SIZE]byte
     i: int
 
@@ -1004,7 +1024,7 @@ send_cmd :: proc(sock: net.TCP_Socket, source: string, cmd: com.RC, params: ..st
 
     for p in params { 
         if MESSAGE_SIZE-2 <= len(p) + i + 1 {
-            return IRC_Errors.Message_To_Big
+            return 0, IRC_Errors.Message_To_Big
         }
 
         i += copy(buf[i:], p)
@@ -1018,23 +1038,32 @@ send_cmd :: proc(sock: net.TCP_Socket, source: string, cmd: com.RC, params: ..st
 }
 
 
-rb_send :: proc(rb: ^Response_Buffer) -> Error {
-    if len(rb.data) <= 0 {
-        return nil
-    }
-    if string(rb.data[len(rb.data)-2:]) != MESS_END_STR {
-        return IRC_Errors.No_End_Of_Message
+rb_send :: proc(rb: ^Response_Buffer) -> (int, Error) {
+    switch {
+    case len(rb.data) <= 0:
+        return 0, nil
+    case len(rb.data) < 2:
+        return 0, IRC_Errors.Not_Enough_Data
+    case string(rb.data[len(rb.data)-2:]) != MESS_END_STR:
+        return 0, IRC_Errors.No_End_Of_Message
     }
 
     n, err := net.send_tcp(rb.sock, rb.data[:])
     if err != nil {
-        return net.Network_Error(err)
+        return 0, err
     }
 
-    log.assertf(n == len(rb.data), "%v != %v: mess = %q", n, len(rb.data), string(rb.data[:]))
+    when IRC_SERVER_DEBUG {
+        log.assertf (
+            n == len(rb.data), 
+            "Not all data sent;; %v != %v;; mess = %q;; sent = %q", 
+            len(rb.data), n, string(rb.data[:]), string(rb.data[:n])
+        )
+    }
+
     clear(&rb.data)
 
-    return nil
+    return n, nil
 }
 
 
@@ -1152,7 +1181,7 @@ rb_mess :: proc(rb: ^Response_Buffer, mess: Message, alloc: runtime.Allocator) -
 }
 
 
-recv_data :: proc(n_buf: ^Net_Buffer, sock: net.TCP_Socket) -> (err: net.Network_Error) {
+recv_data :: proc(n_buf: ^Net_Buffer, sock: net.TCP_Socket) -> (err: net.TCP_Recv_Error) {
     buf: [NET_READ_SIZE]byte
     r: int
 
@@ -1320,10 +1349,15 @@ parse_message_str :: proc(str: string, alloc: runtime.Allocator, clone := false)
         s = s[i+1:]
     }
 
+    if s == "" {
+        log.errorf("Failed to parse Code or Command: %q", mess.raw)
+        return
+    }
+
     // Code or Command check
     i = strings.index_byte(s, ' ')
     if i == -1 {
-        log.errorf("Failed to parse Code or Command: %q", mess.raw)
+        mess.cmd = s
 
     } else if v, ok := strconv.parse_int(s[:i], 10); ok {
         mess.code = com.Response_Code(v)
