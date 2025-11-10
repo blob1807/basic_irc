@@ -8,3 +8,5 @@ ols.json
 *.txt
 *.lnk
 *.pdb
+*.rdi
+basic_irc.raddbg_project
