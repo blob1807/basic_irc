@@ -7,7 +7,7 @@ Each sub-package also has a `main.odin` for easy up and go.
 
 ## Server
 The Server only supports the following commands; `INFO`, `JOIN`, `KICK`, `KILL`, `LIST`, `LUSERS` `MOTD`, `NAMES`, `NICK`, `PART`, `PING`, `PONG`, `PRIVMSG`, `TIME`, `USER`, `VERSION`, `WHO`, `WHOIS` & `QUIT`. All others are reponded with a `ERR_UNKNOWNCOMMAND`.  
-These were chosen as the mininum number of commands needs to operate an IRC server. 
+These were chosen as the mininum number of commands needed to operate an IRC server. 
 
 ## Examples
 
@@ -61,4 +61,4 @@ Neither the Client or Server have been hardend nor use TLS and should NOT be use
 
 ## Other
 It is very likely the Client & Server don't follow common conventions, as I do not use IRC. I tried to do what I belive is reasonable & makes sense.  
-I have defered to [Ergo](https://github.com/ergochat/ergo) in one or two places in the server, when I unsure what to do.
+I have defered to [Ergo](https://github.com/ergochat/ergo) in one or two places in the server, when I was unsure what to do.

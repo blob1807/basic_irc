@@ -37,7 +37,7 @@ FORCE_CLOSE_SERVER: bool = false
 
 
 
-// inits a server with default settings & zeros it.
+// zeros it & inits a server with default settings.
 init_server :: proc(
     s: ^Server, addr: string, 
     name := DEFAULT_NAME, network := DEFAULT_NETWORK, set_i_support := true,
@@ -431,7 +431,6 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
 
             cmds += {.Nick}
             start = time.tick_now()
-            // log.debug("NICK command gotten")
     
         case "USER":
             cmd_user(s, c, rb, mess)
@@ -439,7 +438,6 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
             
             cmds += {.User}
             start = time.tick_now()
-            // log.debug("USER command gotten")
     
         case: 
             if cmds == {.Nick, .User} {
@@ -473,8 +471,6 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
         return IRC_Errors.Registration_Failed
     }
 
-    log.debug("Registration of", c.user, "successful")
-
     pop_net_buf(&c.net_buf)
 
     if _mess, ok := cap_mess.?; ok {
@@ -497,6 +493,8 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
             }
         }
     }
+
+    log.debug("Registration of", c.user, "successful")
 
     // RPL_WELCOME
     rb_cmd(rb, s.name, .RPL_WELCOME, c.user, ":Welcome,", c.nick) or_return
@@ -555,7 +553,11 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
     _, rb_err := rb_send(rb)
 
     if onboard_err != nil || rb_err != nil {
-        log.errorf("Onboard Err: %v;;  RB Err: %v;;  Client: %v", onboard_err, rb_err, c)
+        when IRC_SERVER_DEBUG {
+            log.errorf("Onboard Err: %v;;  RB Err: %v;;  Client: %v", onboard_err, rb_err, c)
+        } else {
+            log.errorf("Onboard Err: %v;;  RB Err: %v;;  Client: %v", onboard_err, rb_err, c.full)
+        }
         if c.quit_mess != "" {
             send_cmd_str(c.sock, s.name, "QUIT", c.user, c.quit_mess)
         } else {
@@ -593,7 +595,7 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
 
     // ========= Client Runner =========
 
-    log.infof("Client thread for \"%v\" has started.", c.full)
+    log.infof("Client thread for %w has started.", c.full)
 
     main_loop: for !sync.atomic_load(&s.close_client_threads) \ 
     && (.Quit not_in sync.atomic_load(&c.flags)) {
@@ -668,7 +670,9 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
 
             case net.TCP_Recv_Error:
                 if v == .Timeout {
-                    // log.debug("Timeout from", c.nick)
+                    when IRC_SERVER_DEBUG {
+                        log.debug("Timeout from", c.nick)
+                    }
                     break mess_loop
                 }
 
@@ -693,7 +697,6 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
 
         if sync.try_lock(&c.to_send_lock) {
             for mess in c.to_send {
-                log.debug(c.user, mess)
                 rb_mess(rb, mess, context.temp_allocator)
                 delete(mess.raw, c.to_send_alloc)
             }
@@ -883,7 +886,7 @@ channel_thread :: proc(s: ^Server, c: ^Channel, _start_barrier: ^sync.Barrier) {
 
 
 /*
-Handles capability negotiation. Limited to sending a single poisoned value and checking if it's not returned.
+Handles capability negotiation. Limited to sending a single poisoned value and checking it's not returned.
 */
 capability_negotiation :: proc(s: ^Server, c: ^Client, in_mess: Message) -> Error  {    
     mess := in_mess
@@ -899,7 +902,9 @@ capability_negotiation :: proc(s: ^Server, c: ^Client, in_mess: Message) -> Erro
         to_lower(poison)
     }
 
-    log.debugf("User %q: Poisoned Capability %q", c.full, poison)
+    when IRC_SERVER_DEBUG {
+        log.debugf("User %q: Poisoned Capability %q", c.full, poison)
+    }
 
     for {
         fmt.println(mess)
@@ -929,7 +934,8 @@ send_bytes :: proc(sock: net.TCP_Socket, buf: []u8) -> (int, Error) {
         return 0, IRC_Errors.Not_Enough_Data
     case len(buf) > MESSAGE_SIZE:
         return 0, IRC_Errors.Message_To_Big
-    case string(buf[len(buf)-2:]) != MESS_END_STR:
+    }
+    if string(buf[len(buf)-2:]) != MESS_END_STR {
         return 0, IRC_Errors.No_End_Of_Message
     }
 

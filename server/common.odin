@@ -248,30 +248,22 @@ of the closest grapheme less then or equal to the given byte index.
 
 Returns `-1` if no valid index is found.
 */
-trucate_to_grapheme :: proc(str: string, byte_idx: int) -> (res: int) {
+trucate_to_grapheme :: proc(str: string, byte_idx: int) -> int {
     if len(str) <= byte_idx {
         return max(0, len(str))
     }
 
-    graphemes, _, _, _ := utf8.decode_grapheme_clusters(str, allocator = context.temp_allocator)
+    iter := utf8.decode_grapheme_iterator_make(str)
+    last := utf8.Grapheme{byte_index = -1}
 
-    switch len(graphemes) {
-    case 0: return -1
-    case 1: return len(str)
-    }
-
-    res = -1
-    cur := graphemes[0].byte_index
-
-    for g in graphemes[1:] {
-        if byte_idx < g.byte_index {
+    for _, g in utf8.decode_grapheme_iterate(&iter) {
+        if byte_idx <= g.byte_index {
             break
         }
-        res = cur
-        cur = g.byte_index
+        last = g
     }
 
-    return res > byte_idx ? -1 : res
+    return last.byte_index
 }
 
 
@@ -303,12 +295,19 @@ trucate_to_rune :: proc(str: string, byte_idx: int) -> (res: int) {
 
 
 /*
-Tries to get the byte index to safely trucate the input string to the end 
-of first the closest grapheme then rune less then or equal to the given byte index.
+Tries to get a byte index to safely trucate the input string to.  
+If `len(str) <= byte_idx`, `len(str)` is returned.  
 
-Returns `byte_idx` if no valid index is found.
+Then tries to find to the end of first the closest grapheme then rune 
+less then or equal to the given byte index.  
+
+If if no valid index is found, `byte_idx` is returned.
 */
 safe_trucate :: proc(str: string, byte_idx: int) -> (res: int) {
+    if len(str) <= byte_idx {
+        return max(0, len(str))
+    }
+
     n := trucate_to_grapheme(str, byte_idx)
     if n != -1 {
         return n
