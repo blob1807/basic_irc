@@ -20,8 +20,8 @@ import sa "core:container/small_array"
 import "../common"
 
 
-// Zeros the given Client
-init_client :: proc(c: ^Client, user: string, url: string, nick := "", real := "", pass := "", alloc := context.allocator) {
+// Zeros & inits the given Client
+init_client :: proc(c: ^Client, user: string, url: string, chan := "#main", nick := "", real := "", pass := "", alloc := context.allocator) {
     runtime.mem_zero(c, size_of(Client))
 
     c.user = user
@@ -30,6 +30,7 @@ init_client :: proc(c: ^Client, user: string, url: string, nick := "", real := "
     c.pass = pass
 
     c.server.url = url
+    c.chan       = chan
 
     c.parsed = make([dynamic]Message, 0, 5, alloc)
 
@@ -111,11 +112,11 @@ send_message :: proc(c: ^Client, mess: string) -> (err: Error) {
         return IRC_Errors.Message_To_Big
     }
 
-    return send_command(c.sock, "PRIVMSG ", c.chan, " :", mess)
+    return send_command(c, "PRIVMSG ", c.chan, " :", mess)
 }
 
 
-send_command :: proc(sock: net.TCP_Socket, cmd: ..string) -> (err: net.Network_Error) {
+send_command :: proc(c: ^Client, cmd: ..string) -> (err: net.Network_Error) {
     i: int
     buf: [MESSAGE_SIZE]byte
     for p in cmd { 
@@ -127,7 +128,7 @@ send_command :: proc(sock: net.TCP_Socket, cmd: ..string) -> (err: net.Network_E
     }
     i += copy(buf[i:], MESS_END)
 
-    n := net.send_tcp(sock, buf[:i]) or_return
+    n := net.send_tcp(c.sock, buf[:i]) or_return
     assert(n == i)
 
     return
@@ -135,14 +136,14 @@ send_command :: proc(sock: net.TCP_Socket, cmd: ..string) -> (err: net.Network_E
 
 
 join_chan :: proc(c: ^Client, chan: string) -> (err: net.Network_Error) {
-    send_command(c.sock, "JOIN ", chan) or_return
+    send_command(c, "JOIN ", chan) or_return
     c.chan = chan
     return
 }
 
 
 leave_chan :: proc(c: ^Client, leave_mess := "") -> (err: net.Network_Error) {
-    send_command(c.sock, "PART ", c.chan, " ", leave_mess) or_return
+    send_command(c, "PART ", c.chan, " ", leave_mess) or_return
     c.chan = ""
     return
 }
@@ -151,9 +152,9 @@ leave_chan :: proc(c: ^Client, leave_mess := "") -> (err: net.Network_Error) {
 leave_server :: proc(c: ^Client, leave_mess := "") -> (err: net.Network_Error) {
     leave_chan(c, leave_mess) or_return
     if leave_mess != "" {
-        send_command(c.sock, "QUIT ", leave_mess) or_return
+        send_command(c, "QUIT ", leave_mess) or_return
     } else {
-        send_command(c.sock, "QUIT") or_return
+        send_command(c, "QUIT") or_return
     }
     
     time.sleep(time.Second)
@@ -179,11 +180,11 @@ join_server :: proc(c: ^Client, dst: string, alloc := context.allocator) -> (err
     mess: Message
 
     if c.pass != "" {
-        send_command(sock, "PASS ", c.pass) or_return
+        send_command(c, "PASS ", c.pass) or_return
         // TODO: Error from server
     }
 
-    send_command(sock, "NICK ", c.nick) or_return
+    send_command(c, "NICK ", c.nick) or_return
     log.debug("Sent Nick", c.nick)
     mess, err = get_messaage(c)
     if v, o := err.(net.Network_Error); o {
@@ -203,7 +204,7 @@ join_server :: proc(c: ^Client, dst: string, alloc := context.allocator) -> (err
         return .Join_Server_Fail
     }
 
-    send_command(sock, "USER ", c.user, " 0 * :", c.nick) or_return
+    send_command(c, "USER ", c.user, " 0 * :", c.nick) or_return
     log.debug("Sent User", c.user)
     mess, err = get_messaage(c)
     if v, o := err.(net.Network_Error); o {
@@ -269,9 +270,9 @@ join_server :: proc(c: ^Client, dst: string, alloc := context.allocator) -> (err
 
             } else if mess.cmd == "PING" {
                 if len(mess.params) != 0 {
-                    send_command(sock, "PONG", mess.params[0])
+                    send_command(c, "PONG", mess.params[0])
                 } else {
-                    send_command(sock, "PONG")
+                    send_command(c, "PONG")
                 }
                 
             }
@@ -629,9 +630,9 @@ recv_thread :: proc(c: ^Client) {
             
             } else if mess.cmd == "PING" {
                 if len(mess.params) != 0 {
-                    err = send_command(c.sock, "PONG ", mess.params[0])
+                    err = send_command(c, "PONG ", mess.params[0])
                 } else {
-                    err = send_command(c.sock, "PONG")
+                    err = send_command(c, "PONG")
                 }
                 
                 if err != nil {
@@ -709,7 +710,7 @@ client_runner :: proc(c: ^Client) {
     recv_thr := thread.create_and_start_with_poly_data(c, recv_thread)
 
     fmt.println(HELP) 
-    join_chan(c, "#main")
+    join_chan(c, c.chan)
     enable_raw_input()
 
     loop: for {
