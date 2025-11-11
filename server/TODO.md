@@ -47,10 +47,10 @@
 
 - [ ] Add Documentation :)
 
-- [ ] Messages should only be allocated to the destination allocator when it can be sent.  
+- [-] Messages should only be allocated to the destination allocator when it can be sent.  
     Allows for the allocator to be an arena. 
     Aplicable to `Channel/Client.to_send` & `Client.mess_cache`
 
-- [ ] `Server.client/channel/nick_lock` could probably be moved to a `rwmutex`
+- [-] `Server.client/channel/nick_lock` could probably be moved to a `rwmutex`
 
-- [ ] Have cleint threads to cleanup after themselfs
+- [X] Have cleint threads to cleanup after themselfs
