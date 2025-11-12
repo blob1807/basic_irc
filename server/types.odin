@@ -361,8 +361,8 @@ I_Support :: struct {
 
 
 Config :: struct {
-    name:    string `fmt:"q"`,
-    address: string `fmt:"q"`,
+    name:    string   `fmt:"q"`,
+    address: string   `fmt:"q"`,
     admins:  []string `fmt:"q"`,
 
     // caps_set: common.Capabilities_Set,
@@ -381,3 +381,12 @@ Config :: struct {
     i_support: I_Support,
 }
 
+
+RATE_LIMIT :: 60 / 2 // 1 message every 2 seconds
+RATE_LIMIT_DEPTH :: 60
+#assert(RATE_LIMIT <= RATE_LIMIT_DEPTH)
+
+Rate_Limiter :: struct {
+    ticks: [RATE_LIMIT_DEPTH]time.Tick,
+    cur:   int,
+}
