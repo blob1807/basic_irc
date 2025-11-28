@@ -50,6 +50,7 @@ init_server :: proc(
     s.address = addr
     s.network = network
     s.onboard_timeout = ONBOARD_TIMEOUT
+    s.client_limiter = DEFAULT_RATE_LIMITER
     s.timers.ping.duration = PING_TIMER_DURATION
     s.timers.ping_check.duration = PING_CHECK_TIMER_DURATION
     s.timers.client_cleanup.duration = CLIENT_CLEANUP_TIMER_DURATION
@@ -353,8 +354,12 @@ open_new_clients_thread :: proc(s: ^Server) {
         }
 
         log.debug("New connection", source)
-
-        c := new_clone(Client{sock=c_sock, ep=source})
+        _c := Client { 
+            sock=c_sock, 
+            ep=source, 
+            limiter=s.client_limiter,
+        }
+        c := new_clone(_c)
         
         start_barrier: sync.Barrier
         sync.barrier_init(&start_barrier, 2)
@@ -1183,6 +1188,28 @@ rb_mess :: proc(rb: ^Response_Buffer, mess: Message, alloc: runtime.Allocator) -
         return IRC_Errors.Message_To_Big
     }
     _, err = append(&rb.data, str)
+    return
+}
+
+
+clear_socket :: proc(sock: net.TCP_Socket) -> (err: net.TCP_Recv_Error) {
+    net.set_blocking(sock, false)
+    defer net.set_blocking(sock, true)
+
+    buf: [NET_READ_SIZE]byte
+    r: int
+
+    for {
+        r, err = net.recv_tcp(sock, buf[:])
+        if err == .Would_Block || r == 0 {
+            err = nil
+            break
+        }
+        if err != nil { 
+            break
+        }
+    }
+
     return
 }
 

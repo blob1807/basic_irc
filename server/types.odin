@@ -106,6 +106,8 @@ IRC_Errors :: enum {
     Capability_Failed,
 
     Server_Force_Quit,
+
+    Rate_Limited,
 }
 
 Error :: union #shared_nil { 
@@ -203,6 +205,8 @@ Server :: struct {
     },
 
     open_connection_thread: ^thread.Thread,
+
+    client_limiter: Rate_Limiter,
 }
 
 
@@ -266,6 +270,8 @@ Client :: struct {
     quit_mess: string `fmt:"q"`,
 
     cleanup_check_count: int,
+
+    limiter: Rate_Limiter,
 }
 
 
@@ -382,11 +388,16 @@ Config :: struct {
 }
 
 
-RATE_LIMIT :: 60 / 2 // 1 message every 2 seconds
-RATE_LIMIT_DEPTH :: 60
-#assert(RATE_LIMIT <= RATE_LIMIT_DEPTH)
+RATE_LIMIT :: 1 // 1 message every 100 millisecond
+RATE_LIMIT_WINDOW :: time.Millisecond * 100
+DEFAULT_RATE_LIMITER :: Rate_Limiter {
+    window = RATE_LIMIT_WINDOW,
+    limit = RATE_LIMIT,
+}
 
 Rate_Limiter :: struct {
-    ticks: [RATE_LIMIT_DEPTH]time.Tick,
-    cur:   int,
+    start:  time.Tick,
+    count:  int,
+    window: time.Duration,
+    limit:  int,
 }

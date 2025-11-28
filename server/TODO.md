@@ -44,6 +44,7 @@
 - [X] Implement Capability Negotiation
 
 - [ ] Add rate limiting to Clients
+    - [ ] Remove bounds checking
 
 - [ ] Add Documentation :)
 
@@ -54,3 +55,5 @@
 - [-] `Server.client/channel/nick_lock` could probably be moved to a `rwmutex`
 
 - [X] Have cleint threads to cleanup after themselfs
+
+- [ ] https://github.com/progval/irctest
