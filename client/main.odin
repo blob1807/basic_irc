@@ -1,6 +1,5 @@
 package basic_irc_client
 
-import "core:os"
 import "core:log"
 
 
@@ -12,7 +11,7 @@ main :: proc() {
     defer client_cleanup(&c)
 
     /*if !get_user_config(&c) {
-        os.exit(-1)
+        return
     }*/
 
     client_runner(&c)

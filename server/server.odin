@@ -953,7 +953,7 @@ send_bytes :: proc(sock: net.TCP_Socket, buf: []u8) -> (int, Error) {
         log.assertf (
             n == len(buf), 
             "Not all data sent;; %v != %v;; mess = %q;; sent = %q", 
-            len(buf), n, string(buf), string(buf[:n])
+            len(buf), n, string(buf), string(buf[:n]),
         )
     }
 
@@ -1068,7 +1068,7 @@ rb_send :: proc(rb: ^Response_Buffer) -> (int, Error) {
         log.assertf (
             n == len(rb.data), 
             "Not all data sent;; %v != %v;; mess = %q;; sent = %q", 
-            len(rb.data), n, string(rb.data[:]), string(rb.data[:n])
+            len(rb.data), n, string(rb.data[:]), string(rb.data[:n]),
         )
     }
 
@@ -1487,5 +1487,6 @@ format_message :: proc(mess: Message, alloc: runtime.Allocator) -> string {
     }
 
     strings.write_bytes(&sb, MESS_END)
+    shrink(&sb.buf)
     return strings.to_string(sb)
 }
