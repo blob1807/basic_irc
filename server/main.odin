@@ -1,11 +1,10 @@
 package basic_irc_server
 
+@(require) import "base:runtime"
+
 @(require) import "core:log"
 @(require) import "core:mem"
 @(require) import "core:fmt"
-@(require) import "base:runtime"
-
-@(require) import com "../common"
 
 main :: proc() { 
     context.logger = log.create_console_logger()
@@ -43,6 +42,7 @@ main :: proc() {
     init_server(&s, DEFAULT_ADDRESS)
     defer server_cleanup(&s)
     // set_ctrl_hander()
+    s.client_limiter = {}
     server_runner(&s)
 
 
