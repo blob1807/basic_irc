@@ -469,7 +469,12 @@ check_rate_limiter :: proc(r: ^Rate_Limiter) -> (limited: bool) {
     return r.count >= r.limit
 }
 
-rate_limiter_left :: proc(r: ^Rate_Limiter) -> (left: time.Duration) {
+reset_rate_limiter :: proc(r: ^Rate_Limiter) {
+    r.start = time.tick_now()
+    r.count = 0
+}
+
+rate_limiter_time_left :: proc(r: ^Rate_Limiter) -> (left: time.Duration) {
     cur := time.tick_now()
     end := time.tick_add(r.start, r.window)
     return time.tick_diff(cur, end)
