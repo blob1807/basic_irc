@@ -392,7 +392,7 @@ RATE_LIMIT :: 1 // 1 message every 100 millisecond
 RATE_LIMIT_WINDOW :: time.Millisecond * 100
 DEFAULT_RATE_LIMITER :: Rate_Limiter {
     window = RATE_LIMIT_WINDOW,
-    limit = RATE_LIMIT,
+    limit  = RATE_LIMIT,
 }
 
 Rate_Limiter :: struct {
