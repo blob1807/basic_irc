@@ -450,7 +450,7 @@ destroy_chan :: proc(c: ^Channel, alloc := context.allocator) {
 }
 
 
-update_rate_limiter :: proc(r: ^Rate_Limiter) -> (limited: bool) {
+rate_limiter_update :: proc(r: ^Rate_Limiter) -> (limited: bool) {
     if r.limit == 0 { return false }
 
     cur  := time.tick_now()
@@ -465,16 +465,16 @@ update_rate_limiter :: proc(r: ^Rate_Limiter) -> (limited: bool) {
     return
 }
 
-check_rate_limiter :: proc(r: ^Rate_Limiter) -> (limited: bool) {
+rate_limiter_check :: proc(r: ^Rate_Limiter) -> (limited: bool) {
     return r.count >= r.limit
 }
 
-reset_rate_limiter :: proc(r: ^Rate_Limiter) {
+rate_limiter_reset :: proc(r: ^Rate_Limiter) {
     r.start = time.tick_now()
     r.count = 0
 }
 
-rate_limiter_time_left :: proc(r: ^Rate_Limiter) -> (left: time.Duration) {
+rate_limiter_time_left :: proc(r: Rate_Limiter) -> (left: time.Duration) {
     cur := time.tick_now()
     end := time.tick_add(r.start, r.window)
     return time.tick_diff(cur, end)

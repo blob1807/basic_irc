@@ -611,7 +611,7 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
         rb.data = make([dynamic]u8, context.temp_allocator)
         
 
-        mess_loop: for sync.atomic_load(&c.flags) & {.Close, .Quit} == {} {
+        mess_loop: for (sync.atomic_load(&c.flags) & {.Close, .Quit}) == nil {
             mess, m_err := get_message(s, c)
 
             #partial switch v in m_err {
@@ -665,6 +665,12 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
 
                 case .User_Mess_To_Big:
                     rb_cmd(rb, s.name, .ERR_INPUTTOOLONG, c.user, ":Input line was too long.")
+                
+                case .Rate_Limited:
+                    left := rate_limiter_time_left(c.limiter)
+                    str := fmt.tprintf(":You are rate limited. Please wait %v before sending another message.")
+                    rb_cmd_str(rb, s.name, "ERROR", c.user, str)
+                    break mess_loop
                 }
 
                 if .Errored in c.flags {
@@ -1298,6 +1304,11 @@ get_message :: proc(s: ^Server, c: ^Client, clone_mess := false) -> (mess: Messa
     if pop_net_buf(&c.net_buf) != nil || c.net_buf.pos == 0 {
         recv_data(&c.net_buf, c.sock) or_return
     }
+    if rate_limiter_update(&c.limiter) {
+        err = .Rate_Limited
+        return
+    }
+
     mess, err = parse_message(&c.net_buf, context.temp_allocator, clone_mess)
     return
 }
