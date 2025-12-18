@@ -5,7 +5,7 @@ Well no truly "basic" but enough to be simple & reasonably usable.
 The Client is limited to 1 channel & server connection at a time.  
 Whilst the Server is set up to handle multiple channels, has only been tested with one.  
 Both will handle & send UTF-8, however the Server's case mapping is always ASCII.  
-Neither are fully written to spec but it should be enough for most cases.
+Neither are fully written to spec but it should be enough for most cases.  
 Each sub-package also has a `main.odin` for easy up and go.  
 
 ## Server
