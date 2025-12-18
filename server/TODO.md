@@ -59,7 +59,7 @@
 
 - [X] Support `Ctrl + BP` for word removel
 
-- [ ] General cleanup
-    - [ ] Add Documentation
-    - [ ] Formating
-    - [ ] Compliance with `-vet -strict-style -vet-tabs -disallow-do -warnings-as-errors`
+- [X] General cleanup
+    - [X] Add Documentation
+    - [X] Formating
+    - [X] Compliance with `-vet -strict-style -vet-tabs -disallow-do -warnings-as-errors`
