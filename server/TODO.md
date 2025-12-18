@@ -45,8 +45,6 @@
 
 - [X] Add rate limiting to Clients
 
-- [ ] Add Documentation :)
-
 - [-] Messages should only be allocated to the destination allocator when it can be sent.  
     Allows for the allocator to be an arena. 
     Aplicable to `Channel/Client.to_send` & `Client.mess_cache`
@@ -60,3 +58,8 @@
 - [X] Handle `Ctrl` properaly
 
 - [X] Support `Ctrl + BP` for word removel
+
+- [ ] General cleanup
+    - [ ] Add Documentation
+    - [ ] Formating
+    - [ ] Compliance with `-vet -strict-style -vet-tabs -disallow-do -warnings-as-errors`

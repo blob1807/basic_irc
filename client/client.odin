@@ -559,6 +559,9 @@ read_input :: proc(c: ^Client, buf: []byte) -> (res: string, err: Error) {
 }
 
 
+/*
+	Attempts to reconnect to the server until an error
+*/
 server_reconnect :: proc(c: ^Client) -> Error {
     for {
         server_err := join_server(c, c.server.url)
@@ -587,6 +590,9 @@ server_reconnect :: proc(c: ^Client) -> Error {
 }
 
 
+/*
+	Receives, Parses & Prints messages from the Server
+*/
 recv_thread :: proc(c: ^Client) {
     if len(c.parsed) != 0 {
         for mess in c.parsed {
@@ -710,6 +716,9 @@ HELP :: `
 `
 
 
+/*
+	Main Client proc
+*/
 client_runner :: proc(c: ^Client) {
 
     server_err := join_server(c, c.server.url)

@@ -35,7 +35,7 @@ FORCE_CLOSE_SERVER: bool = false
 
 
 
-// zeros it & inits a server with default settings.
+// zeros & inits a server with default settings.
 init_server :: proc(
     s: ^Server, addr: string, 
     name := DEFAULT_NAME, network := DEFAULT_NETWORK, set_i_support := true,
@@ -103,8 +103,21 @@ server_cleanup :: proc(s: ^Server, free_i_support := true) {
 }
 
 
+/*
+    Used to run `server_runner` as a thread
+*/
+server_runner_thread :: proc(s: ^Server) {
+    err := server_runner(s)
+    if err != nil {
+        log.error("Server Error:", err)
+    }
+}
+
+
+/*
+    Main Server proc.
+*/
 server_runner :: proc(s: ^Server) -> (err: Error) {
-    context.random_generator = crypto.random_generator()
 
     // This is only done here because it's unknown if the proc will be in a thread or not
     temp_arena: virtual.Arena
@@ -329,7 +342,7 @@ server_runner :: proc(s: ^Server) -> (err: Error) {
 
 
 /*
-Handles the accepting of new client connections & opening of client threads.
+    Handles the accepting of new client connections & opening of client threads.
 */
 open_new_clients_thread :: proc(s: ^Server) {
     assert(context.temp_allocator.procedure == runtime.default_temp_allocator_proc)
@@ -337,7 +350,6 @@ open_new_clients_thread :: proc(s: ^Server) {
 
     context.logger = s.base_logger
     context.allocator = s.base_alloc
-    context.random_generator = crypto.random_generator()
 
     for !sync.atomic_load(&s.close_new_client_thread) {
         defer free_all(context.temp_allocator)
@@ -368,6 +380,9 @@ open_new_clients_thread :: proc(s: ^Server) {
 }
 
 
+/*
+    Handles the onboarding of a new client.
+*/
 onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err: Error) {
     defer if err != nil && false {
         #partial switch v in err {
@@ -387,7 +402,13 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
         case IRC_Errors:
             if v == .User_Mess_To_Big {
                 n := c.net_buf
-                log.error("User message to long", c.net_buf, bytes.index(n.buf[n.read:n.pos], MESS_END))
+                when IRC_SERVER_DEBUG {
+                    log.error(
+                        "User message to long", 
+                        c.net_buf, 
+                        bytes.index(n.buf[n.read:n.pos], MESS_END)
+                    )
+                }
                 rb_cmd(rb, s.name, .ERR_INPUTTOOLONG, c.user, " :Input line was too long,") or_return
             }
         }
@@ -399,7 +420,6 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
     mess: Message
     err = recv_data(&c.net_buf, c.sock)
     if err != nil {
-        log.error(c.net_buf)
         return
     }
 
@@ -455,7 +475,6 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
 
         mess, err = get_message(s, c, false, true)
         if err = check_err(s, c, rb, err); err != nil {
-            log.error(err, cmds)
             return
         }
     }
@@ -530,6 +549,10 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
 }
 
 
+/*
+    Client thread started for each client. 
+    Handles onboarding & commuication between client and channels.
+*/
 client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
     assert(context.temp_allocator.procedure == runtime.default_temp_allocator_proc)
     set_thead_name(fmt.tprint("Client Thread:", c.user), c.thread)
@@ -549,7 +572,7 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
     }
 
 
-    // ========= Client On Boarding =========
+    // ========= Client Onboarding =========
 
     onboard_err := onboard_new_client(s, c, rb)
     _, rb_err := rb_send(rb)
@@ -674,7 +697,7 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
                     && rate_limiter_check(c.limiter) {
                         break mess_loop
                     }
-                    log.warn("Rate limiting", c.user)
+                    log.debug("Rate limiting", c.user)
 
                     left := rate_limiter_time_left(c.limiter)
                     str := fmt.tprintf(":You are rate limited. Please wait %v before sending another message.", left)
@@ -691,9 +714,6 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
 
             case net.TCP_Recv_Error:
                 if v == .Timeout {
-                    when IRC_SERVER_DEBUG {
-                        //log.debug("Timeout from", c.nick)
-                    }
                     break mess_loop
                 }
 
@@ -827,6 +847,10 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
 }
 
 
+/*
+    Channel thread started for each channel. 
+    Handles commuication between the channel and its clients.
+*/
 channel_thread :: proc(s: ^Server, c: ^Channel, _start_barrier: ^sync.Barrier) {
     assert(context.temp_allocator.procedure == runtime.default_temp_allocator_proc)
     set_thead_name(fmt.tprint("Channel Thread:", c.name), c.thread)
@@ -907,7 +931,8 @@ channel_thread :: proc(s: ^Server, c: ^Channel, _start_barrier: ^sync.Barrier) {
 
 
 /*
-Handles capability negotiation. Limited to sending a single poisoned value and checking it's not returned.
+    Handles capability negotiation. 
+    Limited to sending a single poisoned value and checking it's not returned.
 */
 capability_negotiation :: proc(s: ^Server, c: ^Client, in_mess: Message) -> Error  {    
     mess := in_mess
@@ -1208,28 +1233,9 @@ rb_mess :: proc(rb: ^Response_Buffer, mess: Message, alloc: runtime.Allocator) -
 }
 
 
-clear_socket :: proc(sock: net.TCP_Socket) -> (err: net.TCP_Recv_Error) {
-    net.set_blocking(sock, false)
-    defer net.set_blocking(sock, true)
-
-    buf: [NET_READ_SIZE]byte
-    r: int
-
-    for {
-        r, err = net.recv_tcp(sock, buf[:])
-        if err == .Would_Block || r == 0 {
-            err = nil
-            break
-        }
-        if err != nil { 
-            break
-        }
-    }
-
-    return
-}
-
-
+/*
+    Receives data from a socket until an error, end of message found or buffer is full.
+*/
 recv_data :: proc(n_buf: ^Net_Buffer, sock: net.TCP_Socket) -> (err: net.TCP_Recv_Error) {
     buf: [NET_READ_SIZE]byte
     r: int
@@ -1262,13 +1268,21 @@ reset_net_buf :: proc(n: ^Net_Buffer, zero := false) {
 }
 
 
-pop_net_buf :: proc(n: ^Net_Buffer, read_type: enum{None, First, Last, All} = .None) -> (err: Error) {
+/*
+    Pops a message off the front based on `read_mode`:
+        `.None` : just uses whats in `n.pos` already
+        `.First`: finds and pops the first 
+        `.Last` : finds and pops all but the last
+        `.All`  : pops messages
+    `IRC_Errors.No_End_Of_Message` is returned if no `MESS_END` found 
+*/
+pop_net_buf :: proc(n: ^Net_Buffer, read_mode: enum{None, First, Last, All} = .None) -> (err: Error) {
     if n.pos == 0 {
         n.read = 0
         return
     }
 
-    #partial switch read_type {
+    #partial switch read_mode {
     case .All:
         i := bytes.last_index(n.buf[:n.pos], MESS_END)
         if i == -1 {
@@ -1310,6 +1324,10 @@ pop_net_buf :: proc(n: ^Net_Buffer, read_type: enum{None, First, Last, All} = .N
 }
 
 
+/*
+    Gets & Parses a message from the Client.
+    Rate limits the Client.
+*/
 get_message :: proc(s: ^Server, c: ^Client, clone_mess := false, ignore_limit := false) -> (mess: Message, err: Error) {
     if pop_net_buf(&c.net_buf) != nil || c.net_buf.pos == 0 {
         recv_data(&c.net_buf, c.sock) or_return

@@ -15,8 +15,8 @@ import "core:time/timezone"
 import com "../common"
 
 
+// https://modern.ircdocs.horse/#info-message
 cmd_info :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err: Error) {
-    // https://modern.ircdocs.horse/#info-message
     st := format_server_time(s.info.tz, context.temp_allocator)
 
     rb_cmd(rb, s.name, .RPL_INFO, c.nick, ":Server Version " + VERSION)
@@ -29,6 +29,7 @@ cmd_info :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err: Error) {
 }
 
 
+// https://modern.ircdocs.horse/#join-message
 cmd_join :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> (err: Error) {
     if len(mess.params) <= 0 {
         return rb_cmd(rb, s.name, .ERR_NEEDMOREPARAMS, c.nick, ":No channels were provided")
@@ -81,8 +82,8 @@ cmd_join :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
 }
 
 
+// https://modern.ircdocs.horse/#kick-message
 cmd_kick :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> (err: Error) {
-    // https://modern.ircdocs.horse/#kick-message
 
     if len(mess.params) < 2 {
         return rb_cmd(rb, s.name, .ERR_NEEDMOREPARAMS, c.nick, ":No channel & user provied.")
@@ -128,12 +129,13 @@ cmd_kick :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
 }
 
 
+// https://modern.ircdocs.horse/#kill-message
 cmd_kill :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> (err: Error) {
-    // TODO: https://modern.ircdocs.horse/#kill-message
     return rb_cmd_str(rb, s.name, "ERROR", c.nick, ":Command", mess.cmd, "is currently WIP.")
 }
 
 
+// https://modern.ircdocs.horse/#list-message
 cmd_list :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> (err: Error) {
 
     if len(mess.params) == 0 || len(s.channels) == 0 {
@@ -162,6 +164,7 @@ cmd_list :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
 }
 
 
+// https://modern.ircdocs.horse/#lusers-message
 cmd_lusers :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err: Error) {
     buf: [128]u8
     pos, t_pos: int
@@ -230,6 +233,7 @@ cmd_lusers :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err: Error)
 }
 
 
+// https://modern.ircdocs.horse/#motd-message
 cmd_motd :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err: Error) {
     rb_cmd(rb, s.name, .RPL_MOTDSTART, c.nick, ":G'day") or_return
     rb_cmd(rb, s.name, .RPL_MOTD, c.nick, ":AHHHHH") or_return
@@ -238,6 +242,7 @@ cmd_motd :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err: Error) {
 }
 
 
+// https://modern.ircdocs.horse/#names-message
 cmd_names :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> (err: Error) {
     names: []string
     if len(mess.params) != 0 {
@@ -308,6 +313,7 @@ cmd_names :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -
 }
 
 
+// https://modern.ircdocs.horse/#nick-message
 cmd_nick :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> (err: Error) {
     if len(mess.params) == 0 {
         rb_cmd(rb, s.name, .ERR_NONICKNAMEGIVEN, "* :No nickname given.") or_return
@@ -330,6 +336,7 @@ cmd_nick :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
 }
 
 
+// https://modern.ircdocs.horse/#part-message
 cmd_part :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> (err: Error) {
     if len(mess.params) == 0 {
         return rb_cmd(rb, s.name, .ERR_NEEDMOREPARAMS, c.nick, "PART :Not enough parameters")
@@ -380,6 +387,7 @@ cmd_part :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
 }
 
 
+// https://modern.ircdocs.horse/#ping-message
 cmd_ping :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> (err: Error) {
     if len(mess.params) == 0 {
         rb_cmd_str(rb, s.name, "PONG", s.name) or_return
@@ -401,6 +409,7 @@ cmd_ping :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
 }
 
 
+// https://modern.ircdocs.horse/#pong-message
 cmd_pong :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> (err: Error) {
     if .Pinged in sync.atomic_load(&c.flags) {
         if len(mess.params) == 0 || mess.params[0] != c.ping_token {
@@ -414,6 +423,7 @@ cmd_pong :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
 }
 
 
+// https://modern.ircdocs.horse/#privmsg-message
 cmd_privmsg :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> (err: Error) {
     if len(mess.params) <= 0 {
         return rb_cmd(rb, s.name, .ERR_NORECIPIENT, c.nick, ":No recipient given (PRIVMSG)")
@@ -470,6 +480,7 @@ cmd_privmsg :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message)
 }
 
 
+// https://modern.ircdocs.horse/#quit-message
 cmd_quit :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> (err: Error) {
     tail := ":QUIT: "
     if len(mess.params) != 0 {
@@ -504,6 +515,7 @@ cmd_quit :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
 }
 
 
+// https://modern.ircdocs.horse/#time-message
 cmd_time :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err: Error) {
     basic :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, ts: time.Time) -> (err: Error) {
         ts_buf: [21]u8
@@ -553,6 +565,7 @@ cmd_time :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err: Error) {
 }
 
 
+// https://modern.ircdocs.horse/#user-message
 cmd_user :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> (err: Error) {
     if .Registered in c.flags {
         return rb_cmd(rb, s.name, .ERR_ALREADYREGISTERED, c.nick, ":You may not reregister again")
@@ -612,6 +625,7 @@ cmd_user :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
 }
 
 
+// https://modern.ircdocs.horse/#version-message
 cmd_version :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err: Error) {
     rb_cmd(rb, s.name, .RPL_VERSION, s.info.version)
     rb_cmd(rb, s.name, .RPL_ISUPPORT, s.i_support_str)
@@ -620,8 +634,8 @@ cmd_version :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err: Error
 }
 
 
+// https://modern.ircdocs.horse/#who-message
 cmd_who :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> (err: Error) {
-    // https://modern.ircdocs.horse/#who-message
     if len(mess.params) <= 0 {
         return rb_cmd(rb, s.name, .RPL_ENDOFWHOIS, c.nick, "* :End of WHO list")
     }
@@ -659,9 +673,8 @@ cmd_who :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> 
 }
 
 
+// https://modern.ircdocs.horse/#whois-message
 cmd_whois :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> (err: Error) {
-    // https://modern.ircdocs.horse/#whois-message
-
     if len(mess.params) < 1 {
         return rb_cmd(rb, s.name, .ERR_NONICKNAMEGIVEN, c.nick, ":No nickname given")
     }
@@ -702,6 +715,7 @@ cmd_whois :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -
 }
 
 
+// https://modern.ircdocs.horse/#cap-message
 cmd_cap :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message, poison: string) -> (done: bool, err: Error) {
     if .Registered in sync.atomic_load(&c.flags) {
         err = rb_cmd(rb, s.name, .ERR_ALREADYREGISTERED, c.nick, "* :You can only negotiate capability once per session")
@@ -743,7 +757,6 @@ cmd_cap :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message, poi
         done = true
 
     case:
-        log.error("Invalid capability command", mess.params[0], mess)
         err = rb_cmd(rb, s.name, .ERR_INVALIDCAPCMD, c.nick, "CAP",  mess.params[0], ":Invalid capability command")
 
     }

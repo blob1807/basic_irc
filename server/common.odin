@@ -482,18 +482,22 @@ rate_limiter_time_left :: proc(r: Rate_Limiter) -> (left: time.Duration) {
     return time.tick_diff(cur, end)
 }
 
+// Atomicly adds `set` to `flags`
 add_flags :: proc(flags: ^$T/bit_set[$E], set: T) -> T {
     return sync.atomic_or(flags, set)
 }
 
+// Atomicly removes `set` from `flags`
 remove_flags :: proc(flags: ^$T/bit_set[$E], set: T) -> T {
     return sync.atomic_and(flags, ~set)
 }
 
+// Atomicly checks if any of `set` is in `flags`
 has_flags :: proc(flags: ^$T/bit_set[$E], set: T) -> bool {
     return sync.atomic_load(flags) & set != nil
 }
 
+// Atomicly checks if `flag` is in `flags`
 has_flag :: proc(flags: ^$T/bit_set[$E], flag: E) -> bool {
     return flag in sync.atomic_load(flags)
 }
