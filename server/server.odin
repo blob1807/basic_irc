@@ -20,8 +20,6 @@ import "core:mem/virtual"
 import "core:time/timezone"
 import "core:encoding/uuid"
 
-import win "core:sys/windows"
-
 import com "../common"
 
 
@@ -335,7 +333,7 @@ Handles the accepting of new client connections & opening of client threads.
 */
 open_new_clients_thread :: proc(s: ^Server) {
     assert(context.temp_allocator.procedure == runtime.default_temp_allocator_proc)
-    win.SetThreadDescription(s.open_connection_thread.win32_thread, win.L("Open New CLients Thread"))
+    set_thead_name("Open New CLients Thread", s.open_connection_thread)
 
     context.logger = s.base_logger
     context.allocator = s.base_alloc
@@ -413,14 +411,14 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
     // Capability Negotiation
     if mess.cmd == "CAP" {
         cap_mess = clone_message(mess, context.temp_allocator) or_return
-        mess, err = get_message(s, c)
+        mess, err = get_message(s, c, false, true)
         check_err(s, c, rb, err) or_return
     }
 
     // Password
     if mess.cmd == "PASS" {
         // ignore it, no data is preserved between sessions.
-        mess, err = get_message(s, c)
+        mess, err = get_message(s, c, false, true)
         check_err(s, c, rb, err) or_return
     } 
     
@@ -455,7 +453,7 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
             break
         }
 
-        mess, err = get_message(s, c)
+        mess, err = get_message(s, c, false, true)
         if err = check_err(s, c, rb, err); err != nil {
             log.error(err, cmds)
             return
@@ -534,8 +532,7 @@ onboard_new_client :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer) -> (err
 
 client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
     assert(context.temp_allocator.procedure == runtime.default_temp_allocator_proc)
-    thread_desc := win.utf8_to_wstring_alloc(fmt.tprint("Client Thread:", c.user))
-    win.SetThreadDescription(c.thread.win32_thread, thread_desc)
+    set_thead_name(fmt.tprint("Client Thread:", c.user), c.thread)
 
     start_barrier := _start_barrier
     sync.barrier_wait(start_barrier)
@@ -593,8 +590,8 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
 
     log.debug("New User", c)
     defer {
-        sync.atomic_or(&c.flags, {.Quit})
-        sync.atomic_or(&c.thread_flags, {.Has_Closed})
+        add_flags(&c.flags, Client_Flags{.Quit})
+        add_flags(&c.thread_flags, Thread_Flags{.Has_Closed})
     }
 
 
@@ -611,7 +608,13 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
         rb.data = make([dynamic]u8, context.temp_allocator)
         
 
-        mess_loop: for (sync.atomic_load(&c.flags) & {.Close, .Quit}) == nil {
+        //mess_loop: for (sync.atomic_load(&c.flags) & {.Close, .Quit}) == nil {
+        mess_loop: for !has_flags(&c.flags, Client_Flags{.Close, .Quit}) {
+            if .Rate_Limited in sync.atomic_load(&c.flags) \
+             && !rate_limiter_check(c.limiter) {
+                remove_flags(&c.flags, Client_Flags{.Rate_Limited})
+            }
+            
             mess, m_err := get_message(s, c)
 
             #partial switch v in m_err {
@@ -642,7 +645,7 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
                     cmd_quit(s, c, rb, mess)
                     clear(&c.chans)
                     rb_send(rb)
-                    sync.atomic_or(&c.flags, {.Quit})
+                    add_flags(&c.flags, Client_Flags{.Quit})
                     break main_loop
                     
                 case:
@@ -667,40 +670,47 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
                     rb_cmd(rb, s.name, .ERR_INPUTTOOLONG, c.user, ":Input line was too long.")
                 
                 case .Rate_Limited:
+                    if .Rate_Limited in sync.atomic_load(&c.flags) \
+                    && rate_limiter_check(c.limiter) {
+                        break mess_loop
+                    }
+                    log.warn("Rate limiting", c.user)
+
                     left := rate_limiter_time_left(c.limiter)
-                    str := fmt.tprintf(":You are rate limited. Please wait %v before sending another message.")
-                    rb_cmd_str(rb, s.name, "ERROR", c.user, str)
+                    str := fmt.tprintf(":You are rate limited. Please wait %v before sending another message.", left)
+                    rb_cmd(rb, s.name, .RPL_TRYAGAIN, c.user, str)
+                    add_flags(&c.flags, Client_Flags{.Rate_Limited})
                     break mess_loop
                 }
 
                 if .Errored in c.flags {
-                    sync.atomic_or(&c.flags, {.Close})
+                    add_flags(&c.flags, Client_Flags{.Close})
                 }
 
-                sync.atomic_or(&c.flags, {.Errored})
+                add_flags(&c.flags, Client_Flags{.Errored})
 
             case net.TCP_Recv_Error:
                 if v == .Timeout {
                     when IRC_SERVER_DEBUG {
-                        log.debug("Timeout from", c.nick)
+                        //log.debug("Timeout from", c.nick)
                     }
                     break mess_loop
                 }
 
                 log.error("Failed to get data from client", c.user, v)
                 if .Errored in c.flags {
-                    sync.atomic_or(&c.flags, {.Close})
+                    add_flags(&c.flags, Client_Flags{.Close})
                 }
 
-                sync.atomic_or(&c.flags, {.Errored})
+                add_flags(&c.flags, Client_Flags{.Errored})
 
             case:
                 log.error("Failed to get data from client", c.user, m_err)
                 if .Errored in c.flags {
-                    sync.atomic_or(&c.flags, {.Close})
+                    add_flags(&c.flags, Client_Flags{.Close})
                 }
 
-                sync.atomic_or(&c.flags, {.Errored})
+                add_flags(&c.flags, Client_Flags{.Errored})
             }
         }
 
@@ -732,15 +742,16 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
                 send_cmd_str(c.sock, s.name, "PING", string(hash[:]))
 
                 c.ping_token = strings.clone_from_bytes(hash[:])
-                sync.atomic_or(&c.flags, {.Pinged})
+                add_flags(&c.flags, Client_Flags{.Pinged})
             }
 
         } else if .Pinged in sync.atomic_load(&c.flags) {
-            sync.atomic_or(&c.flags, {.Close})
+            add_flags(&c.flags, Client_Flags{.Close})
         } 
 
         
-        if (Client_Flags{.Close, .Ping_Failed} & sync.atomic_load(&c.flags)) != {} {
+        // if (Client_Flags{.Close, .Ping_Failed} & sync.atomic_load(&c.flags)) != nil {
+        if has_flags(&c.flags, Client_Flags{.Close, .Ping_Failed}) {
             if c.quit_mess != "" {
                 send_cmd_str(c.sock, s.name, "QUIT", c.user, c.quit_mess)
             } else {
@@ -772,9 +783,9 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
         }
     }
 
-    log.debug("Closing client:", c.user)
-    sync.atomic_or(&c.thread_flags, {.Closeing})
-    defer sync.atomic_nand(&c.thread_flags, {.Closeing})
+    log.debug("Closing client:", c.user, c.flags)
+    add_flags(&c.thread_flags, Thread_Flags{.Closeing})
+    defer remove_flags(&c.thread_flags, Thread_Flags{.Closeing})
 
     sync.guard(&c.lock)
     sync.guard(&c.to_send_lock)
@@ -807,19 +818,18 @@ client_thread :: proc(s: ^Server, c: ^Client, _start_barrier: ^sync.Barrier) {
     assert(c.user not_in s.clients)
 
     log.debug("User \"", c.user, "\" has been removed from the server", sep="")
-    delete(c.user) // k == c.user
+    delete(c.user) 
     log.infof("Client thread for \"%v\" has ended.", c.full)
 
     mem.zero(c, size_of(Client))
-    free(c)
+    free(c, s.base_alloc)
     
 }
 
 
 channel_thread :: proc(s: ^Server, c: ^Channel, _start_barrier: ^sync.Barrier) {
     assert(context.temp_allocator.procedure == runtime.default_temp_allocator_proc)
-    thread_desc := win.utf8_to_wstring_alloc(fmt.tprint("Channel Thread:", c.name))
-    win.SetThreadDescription(c.thread.win32_thread, thread_desc)
+    set_thead_name(fmt.tprint("Channel Thread:", c.name), c.thread)
 
     start_barrier := _start_barrier
     sync.barrier_wait(start_barrier)
@@ -831,8 +841,8 @@ channel_thread :: proc(s: ^Server, c: ^Channel, _start_barrier: ^sync.Barrier) {
     c.to_send_alloc = s.base_alloc
 
     defer {
-        sync.atomic_or(&c.flags, {.Close})
-        sync.atomic_or(&c.thread_flags, {.Has_Closed})
+        add_flags(&c.flags, Channel_Flags{.Close})
+        add_flags(&c.thread_flags, Thread_Flags{.Has_Closed})
     }
 
     log.infof("Channel thread for \"%v\" has started.", c.name)
@@ -928,7 +938,7 @@ capability_negotiation :: proc(s: ^Server, c: ^Client, in_mess: Message) -> Erro
         rb_send(&rb) or_return
         if done { break }
 
-        mess, err = get_message(s, c)
+        mess, err = get_message(s, c, false, true)
         if err != nil {
             return err
         }
@@ -1300,11 +1310,12 @@ pop_net_buf :: proc(n: ^Net_Buffer, read_type: enum{None, First, Last, All} = .N
 }
 
 
-get_message :: proc(s: ^Server, c: ^Client, clone_mess := false) -> (mess: Message, err: Error) {
+get_message :: proc(s: ^Server, c: ^Client, clone_mess := false, ignore_limit := false) -> (mess: Message, err: Error) {
     if pop_net_buf(&c.net_buf) != nil || c.net_buf.pos == 0 {
         recv_data(&c.net_buf, c.sock) or_return
     }
-    if rate_limiter_update(&c.limiter) {
+
+    if !ignore_limit && rate_limiter_update(&c.limiter) {
         err = .Rate_Limited
         return
     }
