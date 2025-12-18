@@ -1,5 +1,5 @@
 # Basic IRC Client & Server
-A basic IRC Client & Server written in Odin as a toy & example project.  
+A basic IRC Client & Server written in Odin as a toy & learning project.  
 Well no truly "basic" but enough to be simple & reasonably usable. 
 
 The Client is limited to 1 channel & server connection at a time.  
