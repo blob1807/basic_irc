@@ -232,6 +232,7 @@ Client_Flag :: enum {
     Errored,
     Quit, 
     Registered,
+    Rate_Limited,
 }
 
 Client_Flags :: bit_set[Client_Flag]
@@ -396,8 +397,10 @@ DEFAULT_RATE_LIMITER :: Rate_Limiter {
 }
 
 Rate_Limiter :: struct {
-    start:  time.Tick,
-    count:  int,
+    // User defined
     window: time.Duration,
     limit:  int,
+    // Internal
+    start:  time.Tick,
+    count:  int,
 }
