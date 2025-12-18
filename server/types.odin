@@ -15,7 +15,7 @@ import "core:encoding/json"
 import "../common"
 
 
-IRC_SERVER_DEBUG :: #config(IRC_SERVER_DEBUG, true) //#config(IRC_SERVER_DEBUG, ODIN_DEBUG)
+IRC_SERVER_DEBUG :: #config(IRC_SERVER_DEBUG, ODIN_DEBUG)
 
 
 TAGS_SIZE         :: 8191
@@ -389,9 +389,10 @@ Config :: struct {
 }
 
 
-RATE_LIMIT :: 1 // 1 message every 100 millisecond
+RATE_LIMIT :: 1
 RATE_LIMIT_WINDOW :: time.Millisecond * 100
 DEFAULT_RATE_LIMITER :: Rate_Limiter {
+    // 1 message every 100 millisecond
     window = RATE_LIMIT_WINDOW,
     limit  = RATE_LIMIT,
 }
