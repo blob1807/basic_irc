@@ -1,9 +1,12 @@
+#+private
+#+build windows
 package basic_irc_server
 
 import "base:runtime"
 
 import "core:os"
 import "core:fmt"
+import "core:thread"
 import win "core:sys/windows"
 
 
@@ -44,3 +47,8 @@ _set_ctrl_hander :: proc() -> (ok: bool) {
     return true
 }
 
+
+set_thead_name :: proc(name: string, t: ^thread.Thread) {
+    str := win.utf8_to_wstring(name)
+    win.SetThreadDescription(t.win32_thread, str)
+}

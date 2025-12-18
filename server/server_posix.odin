@@ -1,4 +1,5 @@
-#+build !windows
+#+private
+#+build linux, darwin, netbsd, openbsd, freebsd
 package basic_irc_client
 
 import "base:runtime"
@@ -6,10 +7,10 @@ import "base:runtime"
 import "core:c"
 import "core:os"
 import "core:fmt"
+import "core:strings"
+import "core:thread"
 import psx "core:sys/posix"
 
-
-@(private)
 sig_handler :: proc "c" (sig: c.int) {
     context = runtime.default_context()
     os.write_string(os.stdout, "Are you sure you'd like to quit? [Y/n]")
@@ -48,3 +49,46 @@ _set_ctrl_hander :: proc() -> (ok: bool) {
     return true
 }
 
+
+when ODIN_OS == .Darwin {
+    foreign import lib "system:System.framework"
+} else  {
+    foreign import lib "system:pthread"
+} 
+
+when ODIN_OS == .NetBSD {
+    foreign lib {
+        pthread_setname_np :: proc(thread: pthread_t, name: cstring, #c_vararg arg: ..any) -> psx.Errno ---
+    }
+    set_thead_name :: proc(name: string, t: ^thread.Thread) {
+        str := strings.clone_to_cstring(name, context.temp_allocator)
+        pthread_setname_np(t.unix_thread, str)
+    }
+
+} else when ODIN_OS == .Darwin {
+    foreign lib {
+        pthread_setname_np :: proc(cstring) -> c.int ---
+    }
+    set_thead_name :: proc(name: string, t: ^thread.Thread) {
+        str := strings.clone_to_cstring(name, context.temp_allocator)
+        pthread_setname_np(str)
+    }
+
+} else when ODIN_OS == .OpenBSD {
+    foreign lib {
+        pthread_set_name_np :: proc(thread: pthread_t, name: cstring) ---
+    }
+    set_thead_name :: proc(name: string, t: ^thread.Thread) {
+        str := strings.clone_to_cstring(name, context.temp_allocator)
+        pthread_set_name_np(t.unix_thread, str)
+    }
+
+} else when ODIN_OS == .Linux || ODIN_OS == .FreeBSD {
+    foreign lib {
+        pthread_setname_np :: proc(thread: pthread_t, name: cstring) -> psx.Errno ---
+    }
+    set_thead_name :: proc(name: string, t: ^thread.Thread) {
+        str := strings.clone_to_cstring(name, context.temp_allocator)
+        pthread_setname_np(t.unix_thread, str)
+    }
+}
