@@ -14,6 +14,7 @@ import "core:thread"
 import "core:strings"
 import "core:strconv"
 import "core:reflect"
+import "core:unicode"
 import "core:unicode/utf8"
 import sa "core:container/small_array"
 
@@ -497,8 +498,6 @@ print_str :: proc(c: ^Client, str: string, is_err := false) -> (err: Error) {
     return
 }
 
-
-
 read_input :: proc(c: ^Client, buf: []byte) -> (res: string, err: Error) {
     in_stream := os.stream_from_handle(os.stdin)
     
@@ -513,11 +512,24 @@ read_input :: proc(c: ^Client, buf: []byte) -> (res: string, err: Error) {
             ch, sz = io.read_rune(in_stream) or_return
         }
 
+        sync.guard(&c.mutex)
         switch ch {
+        case 0x7F: // Ctrl + Backspace
+            for {
+                char, s := utf8.decode_last_rune(sa.slice(&c.input_buf))
+                if char == utf8.RUNE_ERROR { 
+                    break
+                }
+                sa.consume(&c.input_buf, s)
+                os.write_string(os.stdout, "\b\u0020\b") or_return
+                if strings.is_space(char) {
+                    break
+                }
+            }
+
         case '\b':
-            _, bs_sz := utf8.decode_last_rune_in_bytes(sa.slice(&c.input_buf))
-            if bs_sz > 0 {
-                sync.guard(&c.mutex)
+            bs_char, bs_sz := utf8.decode_last_rune(sa.slice(&c.input_buf))
+            if bs_char != utf8.RUNE_ERROR {
                 sa.consume(&c.input_buf, bs_sz)
                 os.write_string(os.stdout, "\b\u0020\b") or_return
             }
@@ -527,7 +539,6 @@ read_input :: proc(c: ^Client, buf: []byte) -> (res: string, err: Error) {
             // if they're not read all at once
             // see: https://github.com/odin-lang/Odin/issues/4999#issuecomment-2779194161
             
-            sync.guard(&c.mutex)
             n := copy(buf, sa.slice(&c.input_buf))
             sa.clear(&c.input_buf)
             os.write_string(os.stdout, CLEAR_LINE)
@@ -536,11 +547,11 @@ read_input :: proc(c: ^Client, buf: []byte) -> (res: string, err: Error) {
             break loop
 
         case:
-            bytes, n := utf8.encode_rune(ch)
-
-            sync.guard(&c.mutex)
-            sa.append(&c.input_buf, ..bytes[:n])
-            os.write(os.stdout, bytes[:n]) or_return
+            if !unicode.is_control(ch) {
+                bytes, n := utf8.encode_rune(ch)
+                sa.append(&c.input_buf, ..bytes[:n])
+                os.write(os.stdout, bytes[:n]) or_return
+            }
         }
     }
 
