@@ -213,7 +213,7 @@ timer_ended :: proc "contextless" (t: Timer) -> bool {
 }
 
 
-// WARNING: MODIFIES INPUT STRING!!! Used for nick & usernames
+// WARNING: MODIFIES INPUT STRING!!! Used for nicks, usernames & poisoned caps
 to_lower :: proc "contextless" (str: string) -> string {
     // TODO: If I care about speed, look up table might be better
     buf := transmute([]u8)str
@@ -465,8 +465,10 @@ rate_limiter_update :: proc(r: ^Rate_Limiter) -> (limited: bool) {
     return
 }
 
-rate_limiter_check :: proc(r: ^Rate_Limiter) -> (limited: bool) {
-    return r.count >= r.limit
+rate_limiter_check :: proc(r: Rate_Limiter) -> (limited: bool) {
+    cur  := time.tick_now()
+    diff := time.tick_diff(r.start, cur)
+    return diff <= r.window && r.count >= r.limit
 }
 
 rate_limiter_reset :: proc(r: ^Rate_Limiter) {
@@ -480,3 +482,18 @@ rate_limiter_time_left :: proc(r: Rate_Limiter) -> (left: time.Duration) {
     return time.tick_diff(cur, end)
 }
 
+add_flags :: proc(flags: ^$T/bit_set[$E], set: T) -> T {
+    return sync.atomic_or(flags, set)
+}
+
+remove_flags :: proc(flags: ^$T/bit_set[$E], set: T) -> T {
+    return sync.atomic_and(flags, ~set)
+}
+
+has_flags :: proc(flags: ^$T/bit_set[$E], set: T) -> bool {
+    return sync.atomic_load(flags) & set != nil
+}
+
+has_flag :: proc(flags: ^$T/bit_set[$E], flag: E) -> bool {
+    return flag in sync.atomic_load(flags)
+}
