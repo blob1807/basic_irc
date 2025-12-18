@@ -14,22 +14,22 @@ orig_mode: psx.termios
 
 @(private)
 sig_handler :: proc "c" (sig: c.int) {
-    context = runtime.default_context()
-    fini()
+	context = runtime.default_context()
+	fini()
 }
 
 
 @(init)
 init :: proc "contextless" () {
-    // Reset to the original attributes at the end of the program.
-    psx.atexit(disable_raw_mode)
-    psx.signal(psx.SIGINT, sig_handler)
+	// Reset to the original attributes at the end of the program.
+	psx.atexit(disable_raw_mode)
+	psx.signal(psx.SIGINT, sig_handler)
 }
 
 
 @(fini)
 fini :: proc "contextless" () {
-    _disable_raw_mode()
+	_disable_raw_mode()
 }
 
 

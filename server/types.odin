@@ -51,8 +51,8 @@ DEFAULT_NETWORK :: "Bifröst"
 VERSION :: "Hermóðr"
 
 DEFAULT_ENDPOINT := net.Endpoint {
-    address = net.IP4_Loopback,
-    port = 6667,
+	address = net.IP4_Loopback,
+	port = 6667,
 }
 
 
@@ -63,15 +63,15 @@ CLIENT_CLEANUP_TIMER_DURATION :: time.Millisecond * 500
 
 
 DEFAULT_I_SUPPORT :: I_Support {
-    case_map    = "ascii",
-    chan_limit  = {'#', -1},
-    chan_modes  = {'l', 'n'},
-    chan_types  = "#",
-    max_targets = 5,
-    network     = DEFAULT_NETWORK,
-    nick_len    = 8,
-    status_msg  = "@+",
-    user_len    = 16,
+	case_map    = "ascii",
+	chan_limit  = {'#', -1},
+	chan_modes  = {'l', 'n'},
+	chan_types  = "#",
+	max_targets = 5,
+	network     = DEFAULT_NETWORK,
+	nick_len    = 8,
+	status_msg  = "@+",
+	user_len    = 16,
 }
 
 // TODO: Apprently it's malformed formating
@@ -79,79 +79,79 @@ DEFAULT_I_SUPPORT_STR :: "CASEMAPPING=ascii CHANLIMIT=#: CHANMODES=l,n CHANTYPES
 
 
 IRC_Errors :: enum { 
-    Invalid_Rune_Found, 
+	Invalid_Rune_Found, 
 
-    Unable_To_Find_Channel, 
-    No_Valid_Channel_Found, 
-    Not_In_Channel, 
-    Hit_Channel_Limit,
-    Already_In_Channel,
+	Unable_To_Find_Channel, 
+	No_Valid_Channel_Found, 
+	Not_In_Channel, 
+	Hit_Channel_Limit,
+	Already_In_Channel,
 
-    Buffer_Full, 
-    No_End_Of_Message, 
-    No_Message_To_Send, 
+	Buffer_Full, 
+	No_End_Of_Message, 
+	No_Message_To_Send, 
 
-    Message_To_Big, 
-    Sent_More_Data_Then_Given, 
-    Failed_To_Send_Message, 
-    Not_Enough_Data,
+	Message_To_Big, 
+	Sent_More_Data_Then_Given, 
+	Failed_To_Send_Message, 
+	Not_Enough_Data,
 
-    Join_Server_Fail,
+	Join_Server_Fail,
 
-    Cmd_Error,
-    User_Mess_To_Big,
+	Cmd_Error,
+	User_Mess_To_Big,
 
-    Config_Error,
-    Registration_Failed,
-    Capability_Failed,
+	Config_Error,
+	Registration_Failed,
+	Capability_Failed,
 
-    Server_Force_Quit,
+	Server_Force_Quit,
 
-    Rate_Limited,
+	Rate_Limited,
 }
 
 Error :: union #shared_nil { 
-    runtime.Allocator_Error, 
-    net.TCP_Send_Error, 
-    net.TCP_Recv_Error,
-    os.Error,
-    io.Error,
-    json.Unmarshal_Error,
+	runtime.Allocator_Error, 
+	net.TCP_Send_Error, 
+	net.TCP_Recv_Error,
+	os.Error,
+	io.Error,
+	json.Unmarshal_Error,
 
-    IRC_Errors, 
+	IRC_Errors, 
 }
 
 
 
 Response_Buffer :: struct {
-    sock: net.TCP_Socket,
-    data: [dynamic]u8 `fmt:"q"`,
+	sock: net.TCP_Socket,
+	data: [dynamic]u8 `fmt:"q"`,
 }
 
 
 Net_Buffer :: struct {
-    buf:  [NET_BUFFER_SIZE]byte `fmt:"q,pos"`,
-    pos:  int, // amount writen
-    read: int, // amount read
+	buf:  [NET_BUFFER_SIZE]byte `fmt:"q,pos"`,
+	pos:  int, // amount writen
+	read: int, // amount read
 }
 
 
 Timer :: struct {
-    duration: time.Duration,
-    left:     time.Duration,
-    last:     time.Tick,
+	duration: time.Duration,
+	left:     time.Duration,
+	last:     time.Tick,
 }
 
 
 Thread_Flag :: enum {
-    Has_Closed, Closeing,
+	Has_Closed, Closeing,
 }
 
 Thread_Flags :: bit_set[Thread_Flag]
 
 
 Server_Flag :: enum {
-    Pinging,
+	Pinging,
 }
 
 Server_Flags :: bit_set[Server_Flag]
@@ -159,249 +159,249 @@ Server_Flags :: bit_set[Server_Flag]
 
 
 Server :: struct {
-    name:    string `fmt:"q"`,
-    address: string `fmt:"q"`,
-    sock:    net.TCP_Socket,
-    ep:      net.Endpoint,
+	name:    string `fmt:"q"`,
+	address: string `fmt:"q"`,
+	sock:    net.TCP_Socket,
+	ep:      net.Endpoint,
 
-    net_buf: Net_Buffer,
+	net_buf: Net_Buffer,
 
-    // This Allocator needs to be Thread Safe as 
-    // it's used for allocations that are shared & freeed
-    // across multiple threads.
-    base_alloc:  runtime.Allocator,
-    base_logger: runtime.Logger,
+	// This Allocator needs to be Thread Safe as 
+	// it's used for allocations that are shared & freeed
+	// across multiple threads.
+	base_alloc:  runtime.Allocator,
+	base_logger: runtime.Logger,
 
-    nicks:       map[string]string  `fmt:"q"`, //     nick -> username
-    clients:     map[string]^Client `fmt:"q"`, // username -> Client
-    nick_lock:   sync.Mutex,
-    client_lock: sync.Mutex,
-    
-    channels:    map[string]^Channel `fmt:"q"`,
-    channs_lock: sync.Mutex, 
+	nicks:       map[string]string  `fmt:"q"`, //     nick -> username
+	clients:     map[string]^Client `fmt:"q"`, // username -> Client
+	nick_lock:   sync.Mutex,
+	client_lock: sync.Mutex,
+	
+	channels:    map[string]^Channel `fmt:"q"`,
+	channs_lock: sync.Mutex, 
 
-    close_client_threads:    bool, // atmoic
-    close_channel_threads:   bool, // atmoic
-    close_new_client_thread: bool, // atmoic
-    close_server:            bool, // atmoic
+	close_client_threads:    bool, // atmoic
+	close_channel_threads:   bool, // atmoic
+	close_new_client_thread: bool, // atmoic
+	close_server:            bool, // atmoic
 
-    flags: Server_Flags, // atmoic
-    // caps:  common.Capabilities_Set,
+	flags: Server_Flags, // atmoic
+	// caps:  common.Capabilities_Set,
 
-    using i_support: I_Support,
-    i_support_str:   string `fmt:"q"`,
+	using i_support: I_Support,
+	i_support_str:   string `fmt:"q"`,
 
-    stats: Server_Stats,
-    info:  Server_Info,
+	stats: Server_Stats,
+	info:  Server_Info,
 
-    admins: [dynamic]string `fmt:"q"`, // usernames
+	admins: [dynamic]string `fmt:"q"`, // usernames
 
-    onboard_timeout: time.Duration,
-    
-    timers: struct {
-        ping:           Timer, 
-        ping_check:     Timer,
-        client_cleanup: Timer,
-    },
+	onboard_timeout: time.Duration,
+	
+	timers: struct {
+		ping:           Timer, 
+		ping_check:     Timer,
+		client_cleanup: Timer,
+	},
 
-    open_connection_thread: ^thread.Thread,
+	open_connection_thread: ^thread.Thread,
 
-    client_limiter: Rate_Limiter,
+	client_limiter: Rate_Limiter,
 }
 
 
 Server_Stats :: struct {
-    max_num_clients: int,
+	max_num_clients: int,
 }
 
 
 Server_Info :: struct {
-    created: time.Time,
-    tz:      ^datetime.TZ_Region,
-    version: string `fmt:"q"`,
+	created: time.Time,
+	tz:      ^datetime.TZ_Region,
+	version: string `fmt:"q"`,
 }
 
 
 
 Client_Flag :: enum {
-    Close, 
-    Pinged, 
-    Ping_Failed, 
-    Invisable, 
-    Op, 
-    Errored,
-    Quit, 
-    Registered,
-    Rate_Limited,
+	Close, 
+	Pinged, 
+	Ping_Failed, 
+	Invisable, 
+	Op, 
+	Errored,
+	Quit, 
+	Registered,
+	Rate_Limited,
 }
 
 Client_Flags :: bit_set[Client_Flag]
 
 Client :: struct {
-    nick: string `fmt:"q"`,
-    user: string `fmt:"q"`, 
-    real: string `fmt:"q"`,
-    full: string `fmt:"q"`,
+	nick: string `fmt:"q"`,
+	user: string `fmt:"q"`, 
+	real: string `fmt:"q"`,
+	full: string `fmt:"q"`,
 
-    sock: net.TCP_Socket,
-    ep:   net.Endpoint, 
+	sock: net.TCP_Socket,
+	ep:   net.Endpoint, 
 
-    net_buf: Net_Buffer,
-    
-    flags: Client_Flags, // atmoic
-    caps:  common.Capabilities_Set,
+	net_buf: Net_Buffer,
+	
+	flags: Client_Flags, // atmoic
+	caps:  common.Capabilities_Set,
 
-    ping_token: string `fmt:"q"`,
-    pinged:     time.Tick,
+	ping_token: string `fmt:"q"`,
+	pinged:     time.Tick,
 
-    chans:        [dynamic]string `fmt:"q"`,
-    to_send:      [dynamic]Message, 
-    to_send_lock: sync.Mutex,
+	chans:        [dynamic]string `fmt:"q"`,
+	to_send:      [dynamic]Message, 
+	to_send_lock: sync.Mutex,
 
-    // Messages WILL have their `raw` field allocated to the dest's allocator
-    mess_cache: [dynamic]Cached_Message,
+	// Messages WILL have their `raw` field allocated to the dest's allocator
+	mess_cache: [dynamic]Cached_Message,
 
-    to_send_alloc: runtime.Allocator,
+	to_send_alloc: runtime.Allocator,
 
-    thread:       ^thread.Thread,
-    thread_flags: Thread_Flags, // atomic
-    
-    lock: sync.Mutex,
+	thread:       ^thread.Thread,
+	thread_flags: Thread_Flags, // atomic
+	
+	lock: sync.Mutex,
 
-    quit_mess: string `fmt:"q"`,
+	quit_mess: string `fmt:"q"`,
 
-    cleanup_check_count: int,
+	cleanup_check_count: int,
 
-    limiter: Rate_Limiter,
+	limiter: Rate_Limiter,
 }
 
 
 Channel_Flag :: enum {
-    Close, 
+	Close, 
 }
 
 Channel_Flags :: bit_set[Channel_Flag]
 
 Channel_Mode :: enum {
-    Ban, 
-    Exception, 
-    Client_Limit, 
-    Invite_Only, 
-    Invite_Exception, 
-    Key, 
-    Moderated, 
-    Secret, 
-    Protected_Topic, 
-    No_Exteral_Messages,
+	Ban, 
+	Exception, 
+	Client_Limit, 
+	Invite_Only, 
+	Invite_Exception, 
+	Key, 
+	Moderated, 
+	Secret, 
+	Protected_Topic, 
+	No_Exteral_Messages,
 }
 
 Channel_Modes :: bit_set[Channel_Mode]
 
 Channel :: struct {
-    name:  string `fmt:"q"`,
-    admin: [dynamic]string `fmt:"q"`,  // usernames
-    users: [dynamic]^Client,
+	name:  string `fmt:"q"`,
+	admin: [dynamic]string `fmt:"q"`,  // usernames
+	users: [dynamic]^Client,
 
-    to_remove:    [dynamic]^Client, 
-    to_send:      [dynamic]Message, 
-    to_send_lock: sync.Mutex,
+	to_remove:    [dynamic]^Client, 
+	to_send:      [dynamic]Message, 
+	to_send_lock: sync.Mutex,
 
-    to_send_alloc: runtime.Allocator,
+	to_send_alloc: runtime.Allocator,
 
-    flags: Channel_Flags, // atmoic
+	flags: Channel_Flags, // atmoic
 
-    modes: Channel_Modes,
+	modes: Channel_Modes,
 
-    user_limit: int,
+	user_limit: int,
 
-    thread:       ^thread.Thread,
-    thread_flags: Thread_Flags, // atomic
+	thread:       ^thread.Thread,
+	thread_flags: Thread_Flags, // atomic
 
-    lock: sync.Mutex,
+	lock: sync.Mutex,
 }
 
 
 Sender_Type :: enum {
-    None, Invalid, Server, Self, User, Sys, Sys_Err,
+	None, Invalid, Server, Self, User, Sys, Sys_Err,
 }
 
 Sender :: struct {
-    full: string `fmt:"q"`,
-    name: string `fmt:"q"`,
-    type: Sender_Type,
+	full: string `fmt:"q"`,
+	name: string `fmt:"q"`,
+	type: Sender_Type,
 }
 
 Message :: struct {
-    recived: time.Time,
-    raw:     string `fmt:"q"`, // All other fields are views/slices into this string.
-    tags:    string `fmt:"q"`,
-    sender:  Sender,
-    cmd:     string `fmt:"q"`,
-    code:    common.Response_Code,
-    params:  []string,
-    tail:    string `fmt:"q"`,
+	recived: time.Time,
+	raw:     string `fmt:"q"`, // All other fields are views/slices into this string.
+	tags:    string `fmt:"q"`,
+	sender:  Sender,
+	cmd:     string `fmt:"q"`,
+	code:    common.Response_Code,
+	params:  []string,
+	tail:    string `fmt:"q"`,
 }
 
 
 Cached_Message :: struct {
-    using mess: Message,
-    dest:  string `fmt:"q"`,
-    delay: Timer,
+	using mess: Message,
+	dest:  string `fmt:"q"`,
+	delay: Timer,
 }
 
 
 I_Support :: struct {
-    case_map:   string `fmt:"q"`, // only "ascii"
+	case_map:   string `fmt:"q"`, // only "ascii"
 
-    chan_limit: struct{mode: byte, limit: int}, // only set "#"
-    chan_modes: [2]byte, // see CHANNEL_MODES
-    chan_types: string `fmt:"q"`,  // only "#"
+	chan_limit: struct{mode: byte, limit: int}, // only set "#"
+	chan_modes: [2]byte, // see CHANNEL_MODES
+	chan_types: string `fmt:"q"`,  // only "#"
 
-    max_targets: int,
+	max_targets: int,
 
-    network:  string `fmt:"q"`,
-    nick_len: int,
+	network:  string `fmt:"q"`,
+	nick_len: int,
 
-    status_msg: string, // only "@" & "+"
-    user_len:   int,
+	status_msg: string, // only "@" & "+"
+	user_len:   int,
 }
 
 
 Config :: struct {
-    name:    string   `fmt:"q"`,
-    address: string   `fmt:"q"`,
-    admins:  []string `fmt:"q"`,
+	name:    string   `fmt:"q"`,
+	address: string   `fmt:"q"`,
+	admins:  []string `fmt:"q"`,
 
-    // caps_set: common.Capabilities_Set,
-    // caps_arr: []common.Capability,
+	// caps_set: common.Capabilities_Set,
+	// caps_arr: []common.Capability,
 
-    timeouts: struct {
-        onboard: time.Duration,
-    },
+	timeouts: struct {
+		onboard: time.Duration,
+	},
 
-    timers: struct {
-        ping:           time.Duration,
-        ping_check:     time.Duration,
-        client_cleanup: time.Duration,
-    },
+	timers: struct {
+		ping:           time.Duration,
+		ping_check:     time.Duration,
+		client_cleanup: time.Duration,
+	},
 
-    i_support: I_Support,
+	i_support: I_Support,
 }
 
 
 RATE_LIMIT :: 1
 RATE_LIMIT_WINDOW :: time.Millisecond * 100
 DEFAULT_RATE_LIMITER :: Rate_Limiter {
-    // 1 message every 100 millisecond
-    window = RATE_LIMIT_WINDOW,
-    limit  = RATE_LIMIT,
+	// 1 message every 100 millisecond
+	window = RATE_LIMIT_WINDOW,
+	limit  = RATE_LIMIT,
 }
 
 Rate_Limiter :: struct {
-    // User defined
-    window: time.Duration,
-    limit:  int,
-    // Internal
-    start:  time.Tick,
-    count:  int,
+	// User defined
+	window: time.Duration,
+	limit:  int,
+	// Internal
+	start:  time.Tick,
+	count:  int,
 }

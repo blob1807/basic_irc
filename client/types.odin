@@ -46,103 +46,103 @@ CLEAR_LINE   :: "\e[2K\r"
 
 
 IRC_Errors :: enum { 
-    Invalid_Rune_Found, 
+	Invalid_Rune_Found, 
 
-    Unable_To_Find_Channel, 
-    No_Valid_Channel_Found, 
-    Not_In_Channel, 
-    Hit_Channel_Limit,
-    Already_In_Channel,
+	Unable_To_Find_Channel, 
+	No_Valid_Channel_Found, 
+	Not_In_Channel, 
+	Hit_Channel_Limit,
+	Already_In_Channel,
 
-    Buffer_Full, 
-    No_End_Of_Message, 
-    No_Message_To_Send, 
+	Buffer_Full, 
+	No_End_Of_Message, 
+	No_Message_To_Send, 
 
-    Message_To_Big, 
-    Sent_More_Data_Then_Given, 
-    Failed_To_Send_Message, 
+	Message_To_Big, 
+	Sent_More_Data_Then_Given, 
+	Failed_To_Send_Message, 
 
-    Join_Server_Fail,
+	Join_Server_Fail,
 
-    Cmd_Error,
+	Cmd_Error,
 }
 
 
 Error :: union #shared_nil { 
-    runtime.Allocator_Error, 
-    net.Network_Error, 
-    os.Error,
-    io.Error,
+	runtime.Allocator_Error, 
+	net.Network_Error, 
+	os.Error,
+	io.Error,
 
-    IRC_Errors, 
+	IRC_Errors, 
 }
 
 
 Net_Buffer :: struct {
-    buf: [NET_BUFFER_SIZE]byte `fmt:"-"`,
-    pos: int, 
+	buf: [NET_BUFFER_SIZE]byte `fmt:"-"`,
+	pos: int, 
 }
 
 
 Client :: struct {
-    user: string,
-    nick: string,
-    real: string,
-    pass: string, // oh look plain text passwords very secure /s
+	user: string,
+	nick: string,
+	real: string,
+	pass: string, // oh look plain text passwords very secure /s
 
-    server: Server,
-    sock:   net.TCP_Socket,
-    chan:   string,
+	server: Server,
+	sock:   net.TCP_Socket,
+	chan:   string,
 
-    net:    Net_Buffer,
-    parsed: [dynamic]Message `fmt:"-"`,
+	net:    Net_Buffer,
+	parsed: [dynamic]Message `fmt:"-"`,
 
-    input_buf: sa.Small_Array(INPUT_BUFFER_SIZE, byte) `fmt:"-"`,
-    mutex:     sync.Ticket_Mutex,
+	input_buf: sa.Small_Array(INPUT_BUFFER_SIZE, byte) `fmt:"-"`,
+	mutex:     sync.Ticket_Mutex,
 
-    pause_input: bool, // Atmoic
+	pause_input: bool, // Atmoic
 
-    pause_thread:  bool, // Atomic
-    pause_barrier: sync.Barrier,
+	pause_thread:  bool, // Atomic
+	pause_barrier: sync.Barrier,
 
-    close_thread:  bool, // Atomic
-    close_barrier: sync.Barrier,
+	close_thread:  bool, // Atomic
+	close_barrier: sync.Barrier,
 }
 
 
 Server :: struct {
-    url:    string, 
-    name:   string, 
-    socket: net.Socket, 
+	url:    string, 
+	name:   string, 
+	socket: net.Socket, 
 }
 
 
 Sender_Type :: enum {
-    None, 
-    Invalid, 
-    Server, 
-    Self, 
-    User, 
-    Sys, 
-    Sys_Err,
+	None, 
+	Invalid, 
+	Server, 
+	Self, 
+	User, 
+	Sys, 
+	Sys_Err,
 }
 
 
 Sender :: struct {
-    name: string,
-    type: Sender_Type,
+	name: string,
+	type: Sender_Type,
 }
 
 
 Message :: struct {
-    recived: time.Time,
-    // All other fields are views/slices into this string.
-    raw:     string `fmt:"-"`,
-    tags:    string,
-    sender:  Sender,
-    cmd:     string,
-    code:    common.Response_Code,
-    params:  []string,
-    tail:    string,
+	recived: time.Time,
+	// All other fields are views/slices into this string.
+	raw:     string `fmt:"-"`,
+	tags:    string,
+	sender:  Sender,
+	cmd:     string,
+	code:    common.Response_Code,
+	params:  []string,
+	tail:    string,
 }
 
