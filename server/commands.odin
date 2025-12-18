@@ -402,9 +402,9 @@ cmd_ping :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) ->
 
 
 cmd_pong :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message) -> (err: Error) {
-    if .Pinged in c.flags {
+    if .Pinged in sync.atomic_load(&c.flags) {
         if len(mess.params) == 0 || mess.params[0] != c.ping_token {
-            c.flags += {.Ping_Failed}
+            sync.atomic_or(&c.flags, {.Ping_Failed})
         }
 
         c.flags -= {.Pinged}
@@ -732,7 +732,7 @@ cmd_cap :: proc(s: ^Server, c: ^Client, rb: ^Response_Buffer, mess: Message, poi
                 {":Requesting the \"", poison, "\"client capability is forbidden"}, 
                 context.temp_allocator,
             )
-            c.flags += {.Close}
+            sync.atomic_or(&c.flags, {.Close})
             return true, IRC_Errors.Capability_Failed
         }
 
