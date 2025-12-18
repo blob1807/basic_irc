@@ -42,7 +42,6 @@ main :: proc() {
     init_server(&s, DEFAULT_ADDRESS)
     defer server_cleanup(&s)
     // set_ctrl_hander()
-    s.client_limiter = {}
     server_runner(&s)
 
 
