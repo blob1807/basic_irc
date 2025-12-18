@@ -43,8 +43,7 @@
 
 - [X] Implement Capability Negotiation
 
-- [ ] Add rate limiting to Clients
-    - [ ] Remove bounds checking
+- [X] Add rate limiting to Clients
 
 - [ ] Add Documentation :)
 
@@ -57,3 +56,6 @@
 - [X] Have cleint threads to cleanup after themselfs
 
 - [ ] https://github.com/progval/irctest
+
+- [X] Fix clients being able to backspace more then they should with `Ctrl + BP`
+- [X] Support `Ctrl + BP` for word removel
