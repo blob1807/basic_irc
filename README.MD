@@ -1,5 +1,7 @@
 # Basic IRC Client & Server
-A basic IRC Client & Server written in Odin as a toy & example project.   
+A basic IRC Client & Server written in Odin as a toy & example project.  
+Well no truly "basic" but enough to be simple & reasonably usable. 
+
 The Client is limited to 1 channel & server connection at a time.  
 Whilst the Server is set up to handle multiple channels, has only been tested with one.  
 Both will handle & send UTF-8, however the Server's case mapping is always ASCII.  
@@ -59,6 +61,8 @@ main :: proc() {
 Neither the Client or Server have been hardend nor use TLS and should NOT be used on untrusted networks.
 
 
-## Other
+## Other Notes
 It is very likely the Client & Server don't follow common conventions, as I do not use IRC. I tried to do what I belive is reasonable & makes sense.  
 I have defered to [Ergo](https://github.com/ergochat/ergo) in one or two places in the server, when I was unsure what to do.
+
+Both the Server & Client have been checked against `-vet -strict-style -vet-tabs -disallow-do -warnings-as-errors`  
