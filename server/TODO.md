@@ -57,5 +57,6 @@
 
 - [ ] https://github.com/progval/irctest
 
-- [X] Fix clients being able to backspace more then they should with `Ctrl + BP`
+- [X] Handle `Ctrl` properaly
+
 - [X] Support `Ctrl + BP` for word removel
