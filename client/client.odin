@@ -16,7 +16,6 @@ import "core:strconv"
 import "core:reflect"
 import "core:unicode"
 import "core:unicode/utf8"
-import sa "core:container/small_array"
 
 import "../common"
 
@@ -493,13 +492,13 @@ print_str :: proc(c: ^Client, str: string, is_err := false) -> (err: Error) {
 		os.write(os.stdout, buf[:n]) or_return
 	}
 	
-	os.write(os.stdout, sa.slice(&c.input_buf)) or_return
+	os.write(os.stdout, c.input_buf[:]) or_return
 
 	return
 }
 
 read_input :: proc(c: ^Client, buf: []byte) -> (res: string, err: Error) {
-	in_stream := os.stream_from_handle(os.stdin)
+	in_stream := os.to_stream(os.stdin)
 	
 	sync.lock(&c.mutex)
 	os.write_string(os.stdout, CLEAR_LINE)
@@ -516,11 +515,11 @@ read_input :: proc(c: ^Client, buf: []byte) -> (res: string, err: Error) {
 		switch ch {
 		case 0x7F: // Ctrl + Backspace
 			for {
-				char, s := utf8.decode_last_rune(sa.slice(&c.input_buf))
+				char, s := utf8.decode_last_rune(c.input_buf[:])
 				if char == utf8.RUNE_ERROR { 
 					break
 				}
-				sa.consume(&c.input_buf, s)
+				resize(&c.input_buf, len(c.input_buf) + s)
 				os.write_string(os.stdout, "\b\u0020\b") or_return
 				if strings.is_space(char) {
 					break
@@ -528,9 +527,9 @@ read_input :: proc(c: ^Client, buf: []byte) -> (res: string, err: Error) {
 			}
 
 		case '\b':
-			bs_char, bs_sz := utf8.decode_last_rune(sa.slice(&c.input_buf))
+			bs_char, bs_sz := utf8.decode_last_rune(c.input_buf[:])
 			if bs_char != utf8.RUNE_ERROR {
-				sa.consume(&c.input_buf, bs_sz)
+				resize(&c.input_buf, len(c.input_buf) + bs_sz)
 				os.write_string(os.stdout, "\b\u0020\b") or_return
 			}
 
@@ -539,8 +538,8 @@ read_input :: proc(c: ^Client, buf: []byte) -> (res: string, err: Error) {
 			// if they're not read all at once
 			// see: https://github.com/odin-lang/Odin/issues/4999#issuecomment-2779194161
 			
-			n := copy(buf, sa.slice(&c.input_buf))
-			sa.clear(&c.input_buf)
+			n := copy(buf, c.input_buf[:])
+			clear(&c.input_buf)
 			os.write_string(os.stdout, CLEAR_LINE)
 
 			res = string(buf[:n])
@@ -549,7 +548,7 @@ read_input :: proc(c: ^Client, buf: []byte) -> (res: string, err: Error) {
 		case:
 			if !unicode.is_control(ch) {
 				bytes, n := utf8.encode_rune(ch)
-				sa.append(&c.input_buf, ..bytes[:n])
+				append(&c.input_buf, ..bytes[:n])
 				os.write(os.stdout, bytes[:n]) or_return
 			}
 		}

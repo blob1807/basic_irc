@@ -1,7 +1,6 @@
 package basic_irc_server
 
 
-import "core:log"
 import "core:net"
 import "core:time"
 import "core:sync"

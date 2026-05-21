@@ -1,14 +1,12 @@
 package basic_irc_client
 
 import "base:runtime"
-import ir "base:intrinsics"
 
 import "core:io"
 import "core:os"
 import "core:net"
 import "core:time"
 import "core:sync"
-import sa "core:container/small_array"
 
 import "../common"
 
@@ -97,7 +95,7 @@ Client :: struct {
 	net:    Net_Buffer,
 	parsed: [dynamic]Message `fmt:"-"`,
 
-	input_buf: sa.Small_Array(INPUT_BUFFER_SIZE, byte) `fmt:"-"`,
+	input_buf: [dynamic; INPUT_BUFFER_SIZE]byte `fmt:"-"`,
 	mutex:     sync.Ticket_Mutex,
 
 	pause_input: bool, // Atmoic

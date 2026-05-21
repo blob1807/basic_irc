@@ -1,7 +1,6 @@
 package basic_irc_server
 
 import "base:runtime"
-import ir "base:intrinsics"
 
 import "core:os"
 import "core:io"
